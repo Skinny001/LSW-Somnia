@@ -29,9 +29,12 @@ interface RoundApiResponse {
   stakers?: string[];
   timestamp: number;
   rewards?: {
-    rewardPerWinner?: string | bigint;
-    randomWinners?: string[];
+    winnerAmount?: string | bigint;
+    participantAmount?: string | bigint;
     treasuryAmount?: string | bigint;
+    randomWinners?: string[];
+    // Legacy fields for backward compatibility
+    rewardPerWinner?: string | bigint;
   };
   winnerAmount?: string | bigint;
 }
@@ -51,26 +54,29 @@ export function RoundHistory() {
         if (!mounted) return
         if (recent && recent.length > 0) {
           setRounds(
-            recent.map((r: RoundApiResponse) => {
+            recent.map((r: any) => {
               const total = BigInt(r.totalAmount ?? 0)
               let winnerAmount = BigInt(0)
               let participantAmount = BigInt(0)
               let treasuryAmount = BigInt(0)
               let randomWinners: string[] = []
               let stakers: string[] = Array.isArray(r.stakers) ? r.stakers : []
+              
+              // Handle the new rewards structure from fetchRecentRounds
               if (r.rewards) {
-                const rewardPerWinner = BigInt(r.rewards.rewardPerWinner ?? 0)
-                const winnersCount = BigInt(r.rewards.randomWinners?.length ?? 0)
-                participantAmount = rewardPerWinner * winnersCount
-                winnerAmount = BigInt(r.winnerAmount ?? (total * BigInt(70)) / BigInt(100))
+                // Use direct values from the improved fetchRecentRounds
+                winnerAmount = BigInt(r.rewards.winnerAmount ?? 0)
+                participantAmount = BigInt(r.rewards.participantAmount ?? 0)
                 treasuryAmount = BigInt(r.rewards.treasuryAmount ?? 0)
-                randomWinners = r.rewards.randomWinners ?? []
+                randomWinners = Array.isArray(r.rewards.randomWinners) ? r.rewards.randomWinners : []
               } else {
+                // Fallback calculation if no rewards data available
                 winnerAmount = (total * BigInt(70)) / BigInt(100)
                 participantAmount = (total * BigInt(20)) / BigInt(100)
                 treasuryAmount = (total * BigInt(10)) / BigInt(100)
-                randomWinners = Array(10).fill(null).map(() => "0x0000000000000000000000000000000000000000")
+                randomWinners = []
               }
+              
               return {
                 roundId: BigInt(r.roundId ?? 0),
                 winner: String(r.winner ?? "0x0000000000000000000000000000000000000000"),

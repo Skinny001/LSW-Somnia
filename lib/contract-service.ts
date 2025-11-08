@@ -3,8 +3,8 @@
 import { createPublicClient, http, decodeEventLog } from "viem"
 import type { Log } from "viem"
 import { somniaTestnet } from "./wagmi-config"
-import { LSW_CONTRACT_ADDRESS, USE_MOCK_SERVICE } from "./somnia-config"
-import { LSW_ABI } from "./contract-abi"
+import { LSW_CONTRACT_ADDRESS, REWARDER_CONTRACT_ADDRESS, USE_MOCK_SERVICE } from "./somnia-config"
+import { LSW_ABI, REWARDER_ABI } from "./contract-abi"
 
 // Public client used for read-only calls and log polling
 const publicClient = createPublicClient({
@@ -215,71 +215,190 @@ export async function fetchRecentRounds(limit = 10) {
         winner: "0x1234...5678",
         totalAmount: BigInt("500000000000000000"),
         stakersCount: 12,
+        stakers: ["0x1234...5678", "0x9abc...def0", "0x5678...1234"],
         timestamp: Date.now() - 3600000,
+        rewards: {
+          winnerAmount: BigInt("350000000000000000"),
+          participantAmount: BigInt("100000000000000000"),
+          treasuryAmount: BigInt("50000000000000000"),
+          randomWinners: ["0x9abc...def0", "0x5678...1234"],
+        },
       },
       {
         roundId: BigInt(4),
         winner: "0x9abc...def0",
         totalAmount: BigInt("350000000000000000"),
         stakersCount: 8,
+        stakers: ["0x9abc...def0", "0x1111...2222"],
         timestamp: Date.now() - 7200000,
       },
     ]
   }
 
-  // query recent logs for RoundEnded and RewardsDistributed events from a recent block window
+  // Query events from both LSW and Rewarder contracts
   try {
     const currentBlock = BigInt(await publicClient.getBlockNumber())
     const fromBlock = currentBlock > BigInt(1000) ? currentBlock - BigInt(1000) : BigInt(0)
-    const logs = await publicClient.getLogs({
-      address: LSW_CONTRACT_ADDRESS as `0x${string}`,
-      fromBlock,
-      toBlock: currentBlock,
-    })
+    
+    // Query both contracts in parallel
+    const [lswLogs, rewarderLogs] = await Promise.all([
+      publicClient.getLogs({
+        address: LSW_CONTRACT_ADDRESS as `0x${string}`,
+        fromBlock,
+        toBlock: currentBlock,
+      }),
+      publicClient.getLogs({
+        address: REWARDER_CONTRACT_ADDRESS as `0x${string}`,
+        fromBlock,
+        toBlock: currentBlock,
+      })
+    ])
 
     // Parse events for each round
     const rounds: Record<string, any> = {}
-    for (const log of logs) {
+    const blockTimestamps: Record<string, number> = {} // Cache block timestamps
+
+    // Helper function to get block timestamp
+    const getBlockTimestamp = async (blockNumber: bigint): Promise<number> => {
+      const key = blockNumber.toString()
+      if (blockTimestamps[key]) return blockTimestamps[key]
+      
+      try {
+        const block = await publicClient.getBlock({ blockNumber })
+        const timestamp = Number(block.timestamp) * 1000 // Convert to milliseconds
+        blockTimestamps[key] = timestamp
+        return timestamp
+      } catch (err) {
+        return Date.now() // Fallback to current time
+      }
+    }
+
+    // Process LSW contract events
+    for (const log of lswLogs) {
       try {
         const parsed: any = decodeEventLog({ abi: LSW_ABI as any, data: log.data, topics: log.topics })
+        const roundId = BigInt(parsed.args?.[0] ?? BigInt(0))
+        const roundKey = roundId.toString()
+        
         if (parsed?.name === "RoundEnded" || parsed?.eventName === "RoundEnded") {
-          const roundId = BigInt(parsed.args?.[0] ?? parsed.roundId ?? BigInt(0))
-          const winner = String(parsed.args?.[1] ?? parsed.winner ?? "0x0000000000000000000000000000000000000000")
-          const totalAmount = BigInt(parsed.args?.[2] ?? parsed.totalAmount ?? BigInt(0))
-          rounds[roundId.toString()] = { roundId, winner, totalAmount, timestamp: Date.now() }
+          const winner = String(parsed.args?.[1] ?? "0x0000000000000000000000000000000000000000")
+          const totalAmount = BigInt(parsed.args?.[2] ?? BigInt(0))
+          const timestamp = await getBlockTimestamp(log.blockNumber)
+          
+          if (!rounds[roundKey]) rounds[roundKey] = { roundId, stakers: [] }
+          rounds[roundKey] = {
+            ...rounds[roundKey],
+            winner,
+            totalAmount,
+            timestamp,
+          }
         }
-        if (parsed?.name === "RewardsDistributed" || parsed?.eventName === "RewardsDistributed") {
-          const roundId = BigInt(parsed.args?.[0] ?? parsed.roundId ?? BigInt(0))
-          const randomWinners = parsed.args?.winners ?? []
-          const rewardPerWinner = BigInt(parsed.args?.rewardPerWinner ?? BigInt(0))
-          const treasuryAmount = BigInt(parsed.args?.treasuryAmount ?? BigInt(0))
-          if (rounds[roundId.toString()]) {
-            rounds[roundId.toString()].rewards = {
-              randomWinners,
-              rewardPerWinner,
-              treasuryAmount,
+        
+        if (parsed?.name === "StakeReceived" || parsed?.eventName === "StakeReceived") {
+          const staker = String(parsed.args?.[1] ?? "")
+          
+          if (!rounds[roundKey]) rounds[roundKey] = { roundId, stakers: [] }
+          if (!rounds[roundKey].stakers) rounds[roundKey].stakers = []
+          
+          // Add staker if not already in the list
+          if (staker && staker !== "0x0000000000000000000000000000000000000000") {
+            const stakers = rounds[roundKey].stakers
+            if (!stakers.some((s: string) => s.toLowerCase() === staker.toLowerCase())) {
+              stakers.push(staker)
             }
-          } else {
-            rounds[roundId.toString()] = {
-              roundId,
-              rewards: {
-                randomWinners,
-                rewardPerWinner,
+          }
+        }
+        
+        // LSW RewardsDistributed: (roundId, winner, winnerAmount, participantAmount, treasuryAmount)
+        if (parsed?.name === "RewardsDistributed" || parsed?.eventName === "RewardsDistributed") {
+          // Check if this is LSW RewardsDistributed (has 5 args with winner as string)
+          if (parsed.args?.length >= 4 && typeof parsed.args[1] === 'string') {
+            const winner = String(parsed.args[1])
+            const winnerAmount = BigInt(parsed.args[2] ?? BigInt(0))
+            const participantAmount = BigInt(parsed.args[3] ?? BigInt(0))
+            const treasuryAmount = BigInt(parsed.args[4] ?? BigInt(0))
+            
+            if (!rounds[roundKey]) rounds[roundKey] = { roundId, stakers: [] }
+            if (!rounds[roundKey].lswRewards) {
+              rounds[roundKey].lswRewards = {
+                winner,
+                winnerAmount,
+                participantAmount,
                 treasuryAmount,
-              },
-              timestamp: Date.now(),
+              }
             }
           }
         }
       } catch (err) {
-        // skip
+        // Skip invalid events
+        console.warn("Failed to parse LSW event:", err)
       }
     }
 
-    // pick the most recent `limit` rounds
-    const sorted = Object.values(rounds).sort((a, b) => Number(b.roundId) - Number(a.roundId))
-    return sorted.slice(0, limit)
+    // Process Rewarder contract events
+    for (const log of rewarderLogs) {
+      try {
+        const parsed: any = decodeEventLog({ abi: REWARDER_ABI as any, data: log.data, topics: log.topics })
+        
+        // Rewarder RewardsDistributed: (roundId, winners[], rewardPerWinner, treasuryAmount)
+        if (parsed?.name === "RewardsDistributed" || parsed?.eventName === "RewardsDistributed") {
+          const roundId = BigInt(parsed.args?.[0] ?? BigInt(0))
+          const roundKey = roundId.toString()
+          
+          // Check if this is Rewarder RewardsDistributed (has winners array)
+          if (Array.isArray(parsed.args?.[1])) {
+            const randomWinners = parsed.args[1] ?? []
+            const rewardPerWinner = BigInt(parsed.args[2] ?? BigInt(0))
+            const treasuryAmount = BigInt(parsed.args[3] ?? BigInt(0))
+            
+            if (!rounds[roundKey]) rounds[roundKey] = { roundId, stakers: [] }
+            rounds[roundKey].rewarderRewards = {
+              randomWinners,
+              rewardPerWinner,
+              treasuryAmount,
+            }
+          }
+        }
+      } catch (err) {
+        // Skip invalid events
+        console.warn("Failed to parse Rewarder event:", err)
+      }
+    }
+
+    // Combine rewards data and format for UI
+    const formattedRounds = Object.values(rounds).map((round: any) => {
+      const stakersCount = round.stakers?.length ?? 0
+      
+      // Combine LSW and Rewarder rewards
+      let rewards = null
+      if (round.lswRewards || round.rewarderRewards) {
+        rewards = {
+          winnerAmount: round.lswRewards?.winnerAmount ?? BigInt(0),
+          participantAmount: round.lswRewards?.participantAmount ?? BigInt(0),
+          treasuryAmount: round.lswRewards?.treasuryAmount ?? round.rewarderRewards?.treasuryAmount ?? BigInt(0),
+          randomWinners: round.rewarderRewards?.randomWinners ?? [],
+        }
+      }
+      
+      return {
+        roundId: round.roundId,
+        winner: round.winner ?? "0x0000000000000000000000000000000000000000",
+        totalAmount: round.totalAmount ?? BigInt(0),
+        stakersCount,
+        stakers: round.stakers ?? [],
+        timestamp: round.timestamp ?? Date.now(),
+        rewards,
+      }
+    })
+
+    // Filter out rounds without essential data and sort by roundId descending
+    const validRounds = formattedRounds
+      .filter(round => round.roundId && round.winner && round.winner !== "0x0000000000000000000000000000000000000000")
+      .sort((a, b) => Number(b.roundId) - Number(a.roundId))
+    
+    return validRounds.slice(0, limit)
   } catch (err) {
+    console.error("Error fetching recent rounds:", err)
     return []
   }
 }
