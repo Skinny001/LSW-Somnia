@@ -1,281 +1,252 @@
 "use client"
-"use client"
-import React from "react"
-import { useState, useEffect } from "react"
+import React, { useState, useEffect, useCallback } from "react"
 import { useAccount } from "wagmi"
 import { formatEther } from "@/lib/format-utils"
-import { fetchRecentRounds } from "@/lib/contract-service"
+import { watchRoundEndedEvents } from "@/lib/contract-service"
+import { Button } from "./ui/button"
+import { RefreshCw } from "lucide-react"
 
-interface RoundRecord {
-  roundId: bigint;
-  winner: string;
-  totalAmount: bigint;
-  stakersCount?: number;
-  stakers?: string[];
-  timestamp: number;
-  rewards?: {
-    winnerAmount: bigint;
-    participantAmount: bigint;
-    treasuryAmount: bigint;
-    randomWinners: string[];
-  };
-}
-
-interface RoundApiResponse {
-  roundId: string | bigint;
-  winner: string;
-  totalAmount: string | bigint;
-  stakersCount?: number;
-  stakers?: string[];
-  timestamp: number;
-  rewards?: {
-    winnerAmount?: string | bigint;
-    participantAmount?: string | bigint;
-    treasuryAmount?: string | bigint;
-    randomWinners?: string[];
-    // Legacy fields for backward compatibility
-    rewardPerWinner?: string | bigint;
-  };
-  winnerAmount?: string | bigint;
+interface CompletedRound {
+  roundId: bigint
+  winner: string
+  totalAmount: bigint
+  randomWinners?: string[]
+  winnerAmount?: bigint
+  participantAmount?: bigint
+  treasuryAmount?: bigint
+  timestamp: number
 }
 
 export function RoundHistory() {
   const { address: walletAddress } = useAccount()
-  const [rounds, setRounds] = useState<RoundRecord[]>([])
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    let mounted = true
-    const load = async () => {
-      setIsLoading(true)
-      try {
-        const recent = await fetchRecentRounds(10)
-        if (!mounted) return
-        if (recent && recent.length > 0) {
-          setRounds(
-            recent.map((r: any) => {
-              const total = BigInt(r.totalAmount ?? 0)
-              let winnerAmount = BigInt(0)
-              let participantAmount = BigInt(0)
-              let treasuryAmount = BigInt(0)
-              let randomWinners: string[] = []
-              let stakers: string[] = Array.isArray(r.stakers) ? r.stakers : []
-              
-              // Handle the new rewards structure from fetchRecentRounds
-              if (r.rewards) {
-                // Use direct values from the improved fetchRecentRounds
-                winnerAmount = BigInt(r.rewards.winnerAmount ?? 0)
-                participantAmount = BigInt(r.rewards.participantAmount ?? 0)
-                treasuryAmount = BigInt(r.rewards.treasuryAmount ?? 0)
-                randomWinners = Array.isArray(r.rewards.randomWinners) ? r.rewards.randomWinners : []
-              } else {
-                // Fallback calculation if no rewards data available
-                winnerAmount = (total * BigInt(70)) / BigInt(100)
-                participantAmount = (total * BigInt(20)) / BigInt(100)
-                treasuryAmount = (total * BigInt(10)) / BigInt(100)
-                randomWinners = []
-              }
-              
-              return {
-                roundId: BigInt(r.roundId ?? 0),
-                winner: String(r.winner ?? "0x0000000000000000000000000000000000000000"),
-                totalAmount: total,
-                stakersCount: Number(r.stakersCount ?? stakers.length ?? 0),
-                stakers,
-                timestamp: Number(r.timestamp ?? Date.now()),
-                rewards: {
-                  winnerAmount,
-                  participantAmount,
-                  treasuryAmount,
-                  randomWinners,
-                },
-              }
-            })
-          )
-        }
-      } catch (err) {
-        if (mounted) {
-          setError("Failed to load rounds")
-        }
-      } finally {
-        if (mounted) {
-          setIsLoading(false)
-        }
-      }
-    }
-    // Add interval or cleanup if needed
-    load();
-    return () => { mounted = false }
-  }, [])
+  const [rounds, setRounds] = useState<CompletedRound[]>([])
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
 
   // Helper functions
-  function formatAddress(addr: string) {
-    if (!addr || addr === "0x0000000000000000000000000000000000000000") return "None";
-    return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
-  }
-  function formatTimeAgo(timestamp: number) {
-    const seconds = Math.floor((Date.now() - timestamp) / 1000);
-    if (seconds < 60) return `${seconds}s ago`;
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-    return `${Math.floor(seconds / 86400)}d ago`;
+  const formatAddress = (addr: string) => {
+    if (!addr || addr === "0x0000000000000000000000000000000000000000") return "None"
+    return `${addr.slice(0, 6)}...${addr.slice(-4)}`
   }
 
-  if (isLoading) {
-    return (
-      <div className="bg-card border border-border rounded-lg p-6">
-        <p className="text-sm text-muted-foreground text-center py-8">Loading round history...</p>
-      </div>
-    )
+  const formatTimeAgo = (timestamp: number) => {
+    const seconds = Math.floor((Date.now() - timestamp) / 1000)
+    if (seconds < 60) return `${seconds}s ago`
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`
+    return `${Math.floor(seconds / 86400)}d ago`
   }
 
-  if (error) {
-    return (
-      <div className="bg-card border border-border rounded-lg p-6">
-        <p className="text-sm text-red-600 text-center py-8">{error}</p>
-      </div>
-    )
-  }
+  // Function to add a new round to the history
+  const addRoundToHistory = useCallback((roundData: CompletedRound) => {
+    setRounds(prevRounds => {
+      // Check if round already exists
+      const exists = prevRounds.some(r => r.roundId === roundData.roundId)
+      if (exists) return prevRounds
+      
+      console.log(`📝 Adding Round ${roundData.roundId} to history:`, roundData)
+      
+      // Add new round and sort by roundId descending
+      const newRounds = [roundData, ...prevRounds]
+      return newRounds.sort((a, b) => Number(b.roundId) - Number(a.roundId)).slice(0, 10) // Keep last 10 rounds
+    })
+    setLastRefresh(new Date())
+  }, [])
+
+  // Clear history (for testing)
+  const clearHistory = useCallback(() => {
+    console.log("🧹 Clearing round history")
+    setRounds([])
+    setLastRefresh(new Date())
+  }, [])
+
+  // Set up real-time event listeners
+  useEffect(() => {
+    let mounted = true
+    let roundEndedUnsubscribe: (() => void) | null = null
+
+    console.log("🔌 Setting up round history event listeners...")
+
+    const setupEventListeners = async () => {
+      try {
+        // Listen for RoundEnded events
+        roundEndedUnsubscribe = await watchRoundEndedEvents((roundId, winner, totalAmount) => {
+          console.log(`🎉 Round ${roundId} ended! Winner: ${winner}, Prize: ${formatEther(totalAmount)} STT`)
+          
+          if (mounted) {
+            const newRound: CompletedRound = {
+              roundId,
+              winner,
+              totalAmount,
+              timestamp: Date.now(),
+              // Calculate estimated rewards (70/20/10 split)
+              winnerAmount: (totalAmount * BigInt(70)) / BigInt(100), // 70%
+              participantAmount: (totalAmount * BigInt(20)) / BigInt(100), // 20%
+              treasuryAmount: (totalAmount * BigInt(10)) / BigInt(100), // 10%
+              // randomWinners will be updated when RewardsDistributed event fires
+            }
+            addRoundToHistory(newRound)
+          }
+        })
+        
+        console.log("✅ Round history event listeners set up successfully")
+        
+      } catch (err) {
+        console.error("❌ Failed to set up round history event listeners:", err)
+      }
+    }
+
+    setupEventListeners()
+
+    return () => {
+      console.log("🔌 Cleaning up round history event listeners")
+      mounted = false
+      if (roundEndedUnsubscribe) {
+        roundEndedUnsubscribe()
+      }
+    }
+  }, [addRoundToHistory])
 
   return (
     <div className="bg-card border border-border rounded-lg p-6 space-y-4">
-      <h3 className="text-lg font-semibold">Round History</h3>
-      <div className="space-y-3 max-h-96 overflow-y-auto" role="region" aria-label="Round history list">
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold">Round History</h3>
+        <div className="flex items-center gap-2">
+          {lastRefresh && (
+            <span className="text-xs text-muted-foreground">
+              Last updated: {lastRefresh.toLocaleTimeString()}
+            </span>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={clearHistory}
+            className="flex items-center gap-2"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Clear
+          </Button>
+        </div>
+      </div>
+      
+      <div className="space-y-3 max-h-96 overflow-y-auto">
         {rounds.length === 0 ? (
           <div className="text-center py-8">
-            <p className="text-sm text-muted-foreground">No completed rounds yet</p>
+            <p className="text-sm text-muted-foreground">
+              🎲 No completed rounds yet.
+            </p>
+            <p className="text-xs text-muted-foreground mt-2">
+              Round history will appear here automatically when rounds end.
+            </p>
           </div>
         ) : (
-          rounds.map((round: RoundRecord, idx: number) => {
-            const hasRewards = round.rewards && round.rewards.randomWinners && round.rewards.randomWinners.length > 0;
-            const isWinner = walletAddress && round.winner?.toLowerCase() === walletAddress.toLowerCase();
-            const isRandomWinner = walletAddress && round.rewards?.randomWinners?.some(
-              addr => addr?.toLowerCase() === walletAddress.toLowerCase()
-            );
-            const claimStatus = isWinner ? "Pending" : "N/A";
+          rounds.map((round: CompletedRound) => {
+            const isWinner = walletAddress && round.winner?.toLowerCase() === walletAddress.toLowerCase()
+            const isRandomWinner = walletAddress && round.randomWinners?.some(
+              (addr: string) => addr?.toLowerCase() === walletAddress.toLowerCase()
+            )
+            
             return (
-              <React.Fragment key={round.roundId.toString()}>
-                <div
-                  className={`p-3 bg-background rounded border border-border ${isWinner ? 'border-green-500 bg-green-50/30' : ''}`}
-                  role="article"
-                  aria-label={`Round ${round.roundId.toString()}`}
-                >
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-sm font-semibold text-foreground">{`Round #${round.roundId.toString()}`}</span>
-                    <span className="text-xs bg-accent/20 text-accent px-2 py-1 rounded">
-                      {round.stakersCount} stakers
-                    </span>
-                    <span className="text-xs text-muted-foreground ml-auto">{formatTimeAgo(round.timestamp)}</span>
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    <span className="font-medium">Winner:</span>{" "}
-                    <span className="font-mono" title={round.winner}>
+              <div
+                key={round.roundId.toString()}
+                className={`p-4 bg-background rounded border ${isWinner ? 'border-green-500 bg-green-50/30' : 'border-border'}`}
+              >
+                {/* Round Header */}
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-sm font-semibold text-foreground">
+                    Round #{round.roundId.toString()}
+                  </span>
+                  <span className="text-xs text-muted-foreground ml-auto">
+                    {formatTimeAgo(round.timestamp)}
+                  </span>
+                </div>
+                
+                {/* Winner Info */}
+                <div className="space-y-2">
+                  <div className="text-sm">
+                    <span className="font-medium">🏆 Winner:</span>{" "}
+                    <span className="font-mono text-green-600 font-bold" title={round.winner}>
                       {formatAddress(round.winner)}
                     </span>
-                    {isWinner ? (
-                      <span className="ml-2 px-2 py-0.5 rounded bg-green-600 text-white text-xs font-bold">You Won 🎉</span>
-                    ) : null}
-                  </div>
-                  <div className="text-xs text-accent font-semibold">
-                    Prize: {formatEther(round.totalAmount)} STT
-                  </div>
-                  {/* Show all participants/stakers */}
-                  {Array.isArray(round.stakers) && round.stakers.length > 0 && (
-                    <div className="mt-2">
-                      <span className="text-xs font-medium text-foreground">
-                        All Participants ({round.stakers.length}):
+                    {isWinner && (
+                      <span className="ml-2 px-2 py-0.5 rounded bg-green-600 text-white text-xs font-bold">
+                        You Won! 🎉
                       </span>
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {round.stakers.slice(0, 15).map((staker, i) => (
-                          <span
-                            key={i}
-                            className={`text-xs px-1.5 py-0.5 rounded font-mono ${
-                              staker.toLowerCase() === round.winner?.toLowerCase()
-                                ? 'bg-green-100 text-green-700 font-bold border border-green-300'
-                                : walletAddress && staker.toLowerCase() === walletAddress.toLowerCase()
-                                ? 'bg-blue-100 text-blue-700 font-semibold border border-blue-300'
-                                : 'bg-muted text-muted-foreground'
-                            }`}
-                            title={staker}
-                          >
-                            {formatAddress(staker)}
-                            {staker.toLowerCase() === round.winner?.toLowerCase() ? ' 👑' : ''}
-                          </span>
-                        ))}
-                        {round.stakers.length > 15 && (
-                          <span className="text-xs text-muted-foreground px-2 py-0.5">
-                            +{round.stakers.length - 15} more
-                          </span>
-                        )}
+                    )}
+                  </div>
+                  
+                  <div className="text-sm">
+                    <span className="font-medium">💰 Total Prize:</span>{" "}
+                    <span className="font-bold text-accent">
+                      {formatEther(round.totalAmount)} STT
+                    </span>
+                  </div>
+                  
+                  {/* Reward Breakdown */}
+                  {round.winnerAmount && (
+                    <div className="text-xs space-y-1 mt-2 p-2 bg-muted rounded">
+                      <div>
+                        <span className="font-medium">🏆 Winner Share (70%):</span>{" "}
+                        <span className="text-green-600 font-bold">
+                          {formatEther(round.winnerAmount)} STT
+                        </span>
+                      </div>
+                      
+                      <div>
+                        <span className="font-medium">🎲 Random Participants (20%):</span>{" "}
+                        <span className="text-blue-600 font-bold">
+                          {formatEther(round.participantAmount || BigInt(0))} STT
+                        </span>
+                      </div>
+                      
+                      <div>
+                        <span className="font-medium">🏛️ Treasury (10%):</span>{" "}
+                        <span className="text-yellow-600 font-bold">
+                          {formatEther(round.treasuryAmount || BigInt(0))} STT
+                        </span>
                       </div>
                     </div>
                   )}
-                  {hasRewards ? (
-                    <div className="mt-2 text-xs space-y-1">
-                      <div>
-                        <span className="font-medium">Winner Reward:</span>{" "}
-                        <span className="text-green-600 font-bold">
-                          {formatEther(round.rewards?.winnerAmount ?? BigInt(0))} STT
-                        </span>
-                      </div>
-                      <div>
-                        <span className="font-medium">Random Participants:</span>{" "}
-                        <span className="text-blue-600 font-bold">
-                          {formatEther(round.rewards?.participantAmount ?? BigInt(0))} STT
-                        </span>
-                      </div>
-                      <div>
-                        <span className="font-medium">Treasury:</span>{" "}
-                        <span className="text-yellow-600 font-bold">
-                          {formatEther(round.rewards?.treasuryAmount ?? BigInt(0))} STT
-                        </span>
-                      </div>
-                      <div className="mt-2">
-                        <span className="font-medium">Random Winners:</span>
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {round.rewards?.randomWinners?.map((addr, i) => (
-                            <span
-                              key={i}
-                              className={`font-mono text-xs px-1.5 py-0.5 rounded ${
-                                walletAddress && addr?.toLowerCase() === walletAddress.toLowerCase()
-                                  ? 'bg-blue-100 text-blue-700 font-bold'
-                                  : 'bg-muted text-muted-foreground'
-                              }`}
-                              title={addr}
-                            >
-                              {formatAddress(addr)}
-                            </span>
-                          ))}
-                        </div>
-                        {isRandomWinner && (
-                          <span className="inline-block mt-1 px-2 py-0.5 rounded bg-blue-600 text-white text-xs font-bold">
-                            You're a Random Winner! 🎲
+                  
+                  {/* Random Winners (when available) */}
+                  {round.randomWinners && round.randomWinners.length > 0 && (
+                    <div className="mt-2">
+                      <span className="text-xs font-medium">🎲 Random Winners (20% share):</span>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {round.randomWinners.map((addr: string, i: number) => (
+                          <span
+                            key={i}
+                            className={`text-xs px-2 py-1 rounded font-mono ${
+                              walletAddress && addr?.toLowerCase() === walletAddress.toLowerCase()
+                                ? 'bg-blue-100 text-blue-700 font-bold border border-blue-300'
+                                : 'bg-muted text-muted-foreground'
+                            }`}
+                            title={addr}
+                          >
+                            {formatAddress(addr)}
                           </span>
-                        )}
+                        ))}
                       </div>
-                      <div className="text-xs text-green-700 mt-1 font-medium">✓ Rewards distributed</div>
-                      {isWinner && (
-                        <div className="text-xs text-yellow-700">
-                          <span className="font-medium">Claim Status:</span> {claimStatus}
-                        </div>
+                      {isRandomWinner && (
+                        <span className="inline-block mt-1 px-2 py-0.5 rounded bg-blue-600 text-white text-xs font-bold">
+                          You're a Random Winner! 🎲
+                        </span>
                       )}
                     </div>
+                  )}
+                  
+                  {/* Status */}
+                  {!round.randomWinners || round.randomWinners.length === 0 ? (
+                    <div className="text-xs text-orange-600 mt-2">
+                      ⏳ Waiting for rewards distribution...
+                    </div>
                   ) : (
-                    <div className="mt-2 text-xs space-y-1">
-                      <div className="text-xs text-orange-600 font-medium">
-                        ⚠️ Reward distribution event missing or not yet processed.
-                      </div>
-                      {isWinner && (
-                        <div className="text-xs text-yellow-700">
-                          You won, but rewards are not distributed yet. Please wait or contact admin.
-                        </div>
-                      )}
+                    <div className="text-xs text-green-600 mt-2">
+                      ✅ Rewards distributed
                     </div>
                   )}
                 </div>
-              </React.Fragment>
-            );
+              </div>
+            )
           })
         )}
       </div>

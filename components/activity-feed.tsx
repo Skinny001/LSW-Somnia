@@ -184,7 +184,7 @@ export function ActivityFeed({ activities }: ActivityFeedProps) {
                     </p>
                     <p className="text-xs text-muted-foreground">
                       Prize: <span className="font-semibold text-yellow-600">
-                        {formatEther(activity.data.totalAmount)} HBAR
+                        {formatEther(activity.data.totalAmount)} STT
                       </span>
                     </p>
                     {activity.data.stakers && activity.data.stakers.length > 0 && (

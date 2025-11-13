@@ -238,20 +238,46 @@ export async function fetchRecentRounds(limit = 10) {
   // Query events from both LSW and Rewarder contracts
   try {
     const currentBlock = BigInt(await publicClient.getBlockNumber())
-    const fromBlock = currentBlock > BigInt(1000) ? currentBlock - BigInt(1000) : BigInt(0)
     
-    // Query both contracts in parallel
+    // Somnia RPC has 1000 block limit, so we'll use chunked queries
+    const MAX_BLOCK_RANGE = 900 // Stay under 1000 limit with safety margin
+    const totalRange = 2000 // Total blocks to scan (reduced from 5000)
+    const fromBlock = currentBlock > BigInt(totalRange) ? currentBlock - BigInt(totalRange) : BigInt(0)
+    
+    // Helper function to chunk log queries
+    const getLogsChunked = async (contractAddress: string): Promise<any[]> => {
+      const allLogs: any[] = []
+      let currentFromBlock = fromBlock
+      
+      while (currentFromBlock < currentBlock) {
+        const chunkToBlock = currentFromBlock + BigInt(MAX_BLOCK_RANGE) > currentBlock 
+          ? currentBlock 
+          : currentFromBlock + BigInt(MAX_BLOCK_RANGE)
+        
+        try {
+          const chunkLogs = await publicClient.getLogs({
+            address: contractAddress as `0x${string}`,
+            fromBlock: currentFromBlock,
+            toBlock: chunkToBlock,
+          })
+          allLogs.push(...chunkLogs)
+          
+          // Move to next chunk
+          currentFromBlock = chunkToBlock + BigInt(1)
+        } catch (err) {
+          console.warn(`Failed to fetch logs for block range ${currentFromBlock}-${chunkToBlock}:`, err)
+          // Continue with next chunk instead of failing entirely
+          currentFromBlock = chunkToBlock + BigInt(1)
+        }
+      }
+      
+      return allLogs
+    }
+    
+    // Query both contracts in parallel with chunking
     const [lswLogs, rewarderLogs] = await Promise.all([
-      publicClient.getLogs({
-        address: LSW_CONTRACT_ADDRESS as `0x${string}`,
-        fromBlock,
-        toBlock: currentBlock,
-      }),
-      publicClient.getLogs({
-        address: REWARDER_CONTRACT_ADDRESS as `0x${string}`,
-        fromBlock,
-        toBlock: currentBlock,
-      })
+      getLogsChunked(LSW_CONTRACT_ADDRESS),
+      getLogsChunked(REWARDER_CONTRACT_ADDRESS)
     ])
 
     // Parse events for each round
@@ -274,11 +300,15 @@ export async function fetchRecentRounds(limit = 10) {
     }
 
     // Process LSW contract events
+    console.log(`Processing ${lswLogs.length} LSW logs and ${rewarderLogs.length} Rewarder logs`)
+    
     for (const log of lswLogs) {
       try {
         const parsed: any = decodeEventLog({ abi: LSW_ABI as any, data: log.data, topics: log.topics })
         const roundId = BigInt(parsed.args?.[0] ?? BigInt(0))
         const roundKey = roundId.toString()
+        
+        console.log(`LSW Event: ${parsed?.name || parsed?.eventName}, Round: ${roundId}, Block: ${log.blockNumber}`)
         
         if (parsed?.name === "RoundEnded" || parsed?.eventName === "RoundEnded") {
           const winner = String(parsed.args?.[1] ?? "0x0000000000000000000000000000000000000000")
@@ -391,11 +421,22 @@ export async function fetchRecentRounds(limit = 10) {
       }
     })
 
+    // Debug logging
+    console.log(`Fetched ${formattedRounds.length} total rounds from blocks ${fromBlock} to ${currentBlock}`)
+    console.log("Raw rounds data:", formattedRounds)
+    
     // Filter out rounds without essential data and sort by roundId descending
     const validRounds = formattedRounds
-      .filter(round => round.roundId && round.winner && round.winner !== "0x0000000000000000000000000000000000000000")
+      .filter(round => {
+        const isValid = round.roundId && round.winner && round.winner !== "0x0000000000000000000000000000000000000000"
+        if (!isValid) {
+          console.log("Filtered out invalid round:", round)
+        }
+        return isValid
+      })
       .sort((a, b) => Number(b.roundId) - Number(a.roundId))
     
+    console.log(`Returning ${validRounds.length} valid rounds`)
     return validRounds.slice(0, limit)
   } catch (err) {
     console.error("Error fetching recent rounds:", err)
