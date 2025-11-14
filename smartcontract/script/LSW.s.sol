@@ -12,9 +12,9 @@ contract LSWScript is Script {
     uint256 public constant ROUND_DURATION = 3600; // 1 hour in seconds
     uint256 public constant BUFFER_DELAY = 600; // 10 minutes in seconds
     uint256 public constant STAKING_WAIT_PERIOD = 180; // 3 minutes in seconds
-    
-    // VRF Configuration - VRFV2PlusWrapper for native payment (Sonmi testnet)
-    address public constant VRF_WRAPPER = 0x763cC914d5CA79B04dC4787aC14CcAd780a16BD2; // Sonmi testnet VRF Wrapper
+
+    // VRF Configuration - VRFV2PlusWrapper for native payment (Sonmia testnet)
+    address public constant VRF_WRAPPER = 0x763cC914d5CA79B04dC4787aC14CcAd780a16BD2; // Sonmia testnet VRF Wrapper
     
     // Treasury address 
     address public constant TREASURY = 0x12896191de42EF8388f2892Ab76b9a728189260A; 

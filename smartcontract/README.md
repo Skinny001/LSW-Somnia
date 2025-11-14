@@ -154,25 +154,6 @@ forge test --gas-report
 forge coverage
 ```
 
-## Network Configuration
-
-## Base Sepolia
-- VRF Coordinator: `0x5C210eF41CD1a72de73bF76eC39637bB0d3d7BEE`
-- Key Hash (500 gwei): `0x9e1344a1247c8a1785d0a4681a27152bffdb43666ae5bf7d14d24a5efd44bf71`
-
-### Polygon Mainnet
-- VRF Coordinator: `0xAE975071Be8F8eE67addBC1A82488F1C24858067`
-- Key Hash (500 gwei): `0xcc294a196eeeb44da2888d17c0625cc88d70d9760a69d58d853ba6581a9ab0cd`
-
-### Polygon Mumbai Testnet
-- VRF Coordinator: `0x7a1BaC17Ccc5b313516C5E16fb24f7659aA5ebed`
-- Key Hash (500 gwei): `0x4b09e658ed251bcafeebbc69400383d49f344ace09b9576fe248bb02c003fe9f`
-
-### Ethereum Mainnet
-- VRF Coordinator: `0x271682DEB8C4E0901D1a1550aD2e64D568E69909`
-- Key Hash (500 gwei): `0x8af398995b04c28e9951adb9721ef74c74f93e6a478f39e7e0777be13527e7ef`
-
-## API Reference
 
 ### LSW Contract
 
@@ -252,10 +233,11 @@ This project is licensed under the UNLICENSED license.
 
 For questions or issues, please create an issue in the repository or contact the development team.
 
----
+### LSW Contract
+- **Address:** `0xab20e6D156F6F1ea70793a70C01B1a379b603D50`
+- **Explorer:** https://somnia.w3us.site/address/0xab20e6D156F6F1ea70793a70C01B1a379b603D50
 
-## Deployment Address ON Base Sepolia 
- - LSW deployed at: 0x9a849937149f69921375a95f67c9ffDF0ECf2732
- - Rewarder deployed at: 0x1FE132d12771e5dD296144123C2bA5B87987a96B
 
-**⚠️ Important**: Always test thoroughly on testnets before mainnet deployment. Never deploy with real funds without proper testing and security audits.
+### Rewarder Contract
+- **Address:** `0xEa9C19564186958FB6De241c049c3727a6a40c28`
+- **Explorer:** https://somnia.w3us.site/address/0xEa9C19564186958FB6De241c049c3727a6a40c28
