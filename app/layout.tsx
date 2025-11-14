@@ -10,6 +10,11 @@ export const metadata = {
   title: "Last Staker Wins - Somnia Testnet",
   description: "Compete for the prize pool on Somnia Testnet",
   generator: "v0.app",
+  icons: {
+    icon: '/LSW-logo.png',
+    shortcut: '/LSW-logo.png',
+    apple: '/LSW-logo.png',
+  },
 }
 
 export default function RootLayout({

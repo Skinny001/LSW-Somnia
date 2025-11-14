@@ -148,8 +148,12 @@ export default function Home() {
       <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-2 sm:px-4 py-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-0">
           <div className="flex flex-row items-center gap-2 w-full sm:w-auto">
-            <div className="w-10 h-10 bg-accent rounded-lg flex items-center justify-center hover:shadow-lg hover:-translate-y-1 transition-all duration-300 ease-out">
-              <span className="text-accent-foreground font-bold">LSW</span>
+            <div className="w-10 h-10 rounded-lg flex items-center justify-center hover:shadow-lg hover:-translate-y-1 transition-all duration-300 ease-out">
+              <img 
+                src="/LSW-logo.png" 
+                alt="LSW Logo" 
+                className="w-10 h-10 object-contain rounded-lg"
+              />
             </div>
             <div>
               <h1 className="text-lg sm:text-xl font-bold text-foreground">Last Staker Wins</h1>
