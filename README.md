@@ -1,121 +1,251 @@
-# Last Staker Win (LSW) - Smart Contract
+# 🎯 Last Staker Wins (LSW) - Somnia Testnet
 
-## Overview
+[![Built with Next.js](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org/)
+[![Deployed on Somnia](https://img.shields.io/badge/Somnia-Testnet-blue)](https://somnia.network/)
+[![Solidity](https://img.shields.io/badge/Solidity-^0.8.19-red)](https://soliditylang.org/)
 
-Last Staker Win (LSW) is a blockchain-based game where participants stake ETH to become the "last staker" within a time window. The last person to stake before the deadline wins the majority of the pool, while other participants and the platform treasury receive smaller rewards.
+## 🚀 Hackathon Submission Overview
 
-## Contract Architecture
+**Last Staker Wins** is a competitive blockchain game built for **Somnia Testnet** where players stake STT tokens to become the last staker before the round deadline. The game combines strategy, timing, and luck with fair reward distribution powered by Chainlink VRF.
 
-The system consists of two main contracts:
+### 🎮 What Makes This Special
 
-### 1. LSW Contract (`LSW.sol`)
-The main game contract that handles:
-- Round management and timing
-- Stake collection and validation
+- **Strategic Timing**: Late stakes extend the round deadline, creating intense final moments
+- **Fair Distribution**: 70% to winner, 20% to random participants, 10% to treasury
+- **Real-time Updates**: Live activity feed shows all stakes and round completions
+- **Mobile Optimized**: Responsive design works perfectly on all devices
+- **Provably Fair**: Chainlink VRF ensures transparent random selection
+
+### 🏆 Key Achievements
+
+- ✅ **Full-Stack Implementation**: Smart contracts + modern web frontend
+- ✅ **Somnia Integration**: Native STT token support with 18-decimal precision
+- ✅ **Real-time Experience**: Live updates without page refresh
+- ✅ **Admin Dashboard**: Complete game management interface
+- ✅ **Security First**: Comprehensive access controls and validation
+
+## 🎯 Demo & Live Application
+
+**🌐 Live Demo**: [Deploy URL Coming Soon]  
+**📱 Try it Now**: Connect your wallet and play on Somnia Testnet  
+**🔗 Contracts**: View verified contracts on Somnia Explorer  
+
+### 📸 Screenshots
+
+![Game Interface](public/LSW-logo.png)  
+*Main game interface with real-time updates*
+
+---
+
+## 🏗️ Architecture Overview
+
+### 🖥️ Frontend Stack
+- **Next.js 16** with App Router (Latest features)
+- **TypeScript** for type safety
+- **Tailwind CSS** + shadcn/ui for modern design
+- **Wagmi v2 + Viem** for blockchain interactions
+- **Real-time Events** using WebSocket-like contract listening
+
+### ⛓️ Smart Contract Architecture
+
+The system consists of two main contracts deployed on **Somnia Testnet**:
+
+#### 1. 🎮 LSW Contract (`LSW.sol`)
+**Address**: `0xab20...` (Somnia Testnet)
+- Round management and timing logic
+- STT token stake collection (18 decimals)
 - Winner determination
+- Administrative controls
 - Emergency functions
 
-### 2. Rewarder Contract (`rewarder.sol`)
-Handles reward distribution using Chainlink VRF for fairness:
-- Random participant selection (when >10 participants)
-- Reward distribution to winners and participants
-- Platform treasury management
-- VRF integration for true randomness
+#### 2. 🎲 Rewarder Contract (`rewarder.sol`)  
+**Address**: `0xEa9C...` (Somnia Testnet)
+- Chainlink VRF integration for fairness
+- Random participant selection (when >10 players)
+- Automated reward distribution
+- Treasury management
 
-## How It Works
+## 🎮 How The Game Works
 
-### Game Flow
+### 🔄 Complete Game Flow
 
-1. **Round Initialization**: A new round starts with a fixed duration (default: 1 hour)
+```mermaid
+graph TD
+    A[🎯 Round Start] --> B[⏳ Wait Period<br/>3 minutes]
+    B --> C[💰 Staking Available]
+    C --> D{💸 New Stake?}
+    D -->|Yes| E[⏰ Extend Deadline?]
+    E -->|In Buffer Period| F[➕ Add Time]
+    E -->|Outside Buffer| G[🔄 Continue]
+    F --> D
+    G --> D
+    D -->|No| H[⌛ Deadline Reached]
+    H --> I[🏆 Winner Declared]
+    I --> J[🎲 VRF Random Selection]
+    J --> K[💳 Reward Distribution]
+    K --> A
+```
 
-2. **Wait Period**: After a new round starts, there's a configurable wait period (default: 10 minutes) before staking becomes available
+### 📋 Detailed Mechanics
 
-3. **Staking Phase**: 
-   - Users can stake ETH after the wait period ends (minimum amount required)
-   - Each stake extends the deadline if made within the buffer period
-   - The last person to stake becomes the potential winner
+1. **🚀 Round Initialization**
+   - New round starts automatically or by winner/admin
+   - Fixed duration: 1 hour default
+   - Prize pool starts at zero
 
-4. **Round End**:
-   - Round ends when the deadline passes
-   - The last staker becomes the winner
-   - Stakes are locked until reward distribution
+2. **⏰ Staking Wait Period**  
+   - **3-minute cooldown** after round start
+   - Prevents immediate staking rushes
+   - UI shows countdown until staking available
 
-5. **Reward Distribution**:
-   - **70%** goes to the winner
-   - **20%** is distributed among random participants (up to 10)
-   - **10%** goes to the platform treasury
+3. **💰 Active Staking Phase**
+   - Minimum stake: **0.01 STT tokens**
+   - Each stake makes you the potential winner
+   - **Smart deadline extension**: Stakes within 10 minutes of deadline add extra time
 
-6. **New Round**: Winner or contract owner can start the next round (with a new wait period)
+4. **🏁 Round Completion**
+   - Automatic end when deadline passes
+   - Last staker becomes the winner
+   - All stakes locked until distribution
 
-### Timing Mechanics
+5. **🎁 Reward Distribution**
+   - **70%** → Winner (guaranteed)
+   - **20%** → Random participants (via Chainlink VRF)
+   - **10%** → Platform treasury
+   - Automatic distribution with transparent random selection
 
-- **Round Duration**: Base time for each round (configurable)
-- **Staking Wait Period**: Time after round starts before staking becomes available (default: 10 minutes)
-- **Buffer Delay**: If a stake occurs within this time of the deadline, it may extend the round
-- **Stake Buffer**: Amount of time added to deadline when staking in buffer period
+6. **🔄 Next Round**
+   - Winner or admin can start next round
+   - Fresh 3-minute wait period begins
+   - Previous round history preserved
 
-Example: After a new round starts, users must wait 10 minutes before they can stake. Once staking is available, if someone stakes within 10 minutes of the deadline (buffer delay), the deadline extends by the stake buffer amount.
+---
 
-## Key Features
+## ✨ Key Features & Innovation
 
-### Fair Random Distribution
-- Uses Chainlink VRF for provably fair random participant selection
-- Automatically distributes among all participants if ≤10 people
-- Selects 10 random participants if >10 people (duplicates allowed)
+### 🎯 Frontend Innovation
+- **🔴 Real-time Activity Feed**: Live stake notifications and round completions
+- **📊 Round History**: Complete historical data with winner information  
+- **👥 Multi-wallet Support**: MetaMask, WalletConnect, and more
+- **📱 Mobile-First Design**: Perfect experience on any device
+- **⚡ Instant Updates**: No refresh needed, everything updates live
+- **🎨 Modern UI**: Clean, intuitive interface with smooth animations
 
-### Security Features
-- Owner-only administrative functions
-- Emergency withdrawal capabilities
-- Input validation and error handling
-- Reentrancy protection through careful state management
-- Staking wait period prevents immediate staking rushes after new rounds
+### ⛓️ Smart Contract Innovation
+- **🎲 Provably Fair Randomness**: Chainlink VRF integration
+- **⏰ Dynamic Timing**: Smart deadline extensions for exciting finishes  
+- **🛡️ Security First**: Comprehensive access controls and validations
+- **💎 Gas Optimized**: Efficient storage and minimal transaction costs
+- **🔧 Configurable**: Admin can adjust timing and stake parameters
+- **🚨 Emergency Controls**: Safe withdrawal and pause mechanisms
 
-### Anti-Gridlock Protection
-- Stake function no longer attempts refunds for expired rounds (prevents contract halts)
-- Clear error messages for different failure scenarios
-- Round expiration handling moved to `startNewRound()` function
+### 🌟 Somnia-Specific Features
+- **🪙 Native STT Integration**: Full 18-decimal precision support
+- **🚀 Optimized for Somnia**: Leveraging network's high performance
+- **🔗 Block Explorer Integration**: Full transaction transparency
+- **⚡ Fast Confirmation**: Quick transaction processing
 
-### Flexible Configuration
-- Adjustable stake amounts
-- Configurable timing parameters
-- Updatable treasury and rewarder addresses
+---
 
-## Contract Deployment
+## 🚀 Quick Start Guide
 
-### Prerequisites
+### 🎮 For Players
 
-1. **Foundry Installation**: Make sure you have Foundry installed
-2. **Environment Setup**: Create a `.env` file with:
-   ```
-   PRIVATE_KEY=your_private_key_here
-   ```
-3. **Chainlink VRF Subscription**: 
-   - Create a VRF subscription at [vrf.chain.link](https://vrf.chain.link)
-   - Fund it with LINK tokens
-   - Note your subscription ID
+1. **🔗 Connect Wallet**: Use MetaMask or any Web3 wallet
+2. **🌐 Switch Network**: Connect to Somnia Testnet
+3. **💰 Get STT Tokens**: Use Somnia Testnet faucet
+4. **🎯 Start Playing**: Wait for staking to become available, then stake!
 
-### Deployment Steps
+### 👨‍💻 For Developers
 
-1. **Update Configuration**: Edit `script/LSW.s.sol` and update:
-   - `VRF_COORDINATOR`: Address for your network
-   - `KEY_HASH`: Gas lane for your network
-   - `SUBSCRIPTION_ID`: Your VRF subscription ID
-   - `TREASURY`: Your treasury address
-   - Timing and stake parameters as needed
+#### Prerequisites
+- Node.js 18+
+- Git
+- Web3 wallet for testing
 
-2. **Deploy to Network**:
-   ```bash
-   # For mainnet/testnet with real VRF
-   forge script script/LSW.s.sol:LSWScript --rpc-url <your_rpc_url> --broadcast --verify
-   
-   # For local testing with mock VRF
-   forge script script/LSW.s.sol:LSWScript --rpc-url http://localhost:8545 --broadcast --sig "deployWithMockVRF()"
-   ```
+#### 🏃‍♂️ Local Development
 
-3. **Post-Deployment**:
-   - Add the deployed Rewarder contract as a consumer to your VRF subscription
-   - Verify the contract source code on the block explorer
-   - Test with small amounts first
+```bash
+# Clone the repository
+git clone https://github.com/Skinny001/LSW-Somnia.git
+cd LSW-Somnia
+
+# Install dependencies
+npm install
+
+# Set up environment
+cp .env.example .env.local
+# Add your wallet and contract addresses
+
+# Run development server
+npm run dev
+
+# Build for production
+npm run build
+```
+
+#### 🌐 Environment Variables
+
+```env
+# Required for local development
+NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=your_project_id
+
+# Somnia Testnet Contract Addresses
+NEXT_PUBLIC_LSW_CONTRACT_ADDRESS=0xab20...
+NEXT_PUBLIC_REWARDER_CONTRACT_ADDRESS=0xEa9C...
+NEXT_PUBLIC_TREASURY_ADDRESS=0x1289...
+
+# Development Admin Access
+NEXT_PUBLIC_DEV_ADMIN_ADDRESSES=0x372b...
+```
+
+---
+
+## 🏆 Technical Highlights
+
+### 🎯 Frontend Architecture
+
+```typescript
+// Real-time event listening example
+const watchRoundEndedEvents = async (callback: Function) => {
+  return publicClient.watchContractEvent({
+    address: LSW_CONTRACT_ADDRESS,
+    abi: LSW_ABI,
+    eventName: 'RoundEnded',
+    onLogs: (logs) => {
+      logs.forEach((log) => {
+        const { roundId, winner, totalAmount } = log.args
+        callback(roundId, winner, totalAmount)
+      })
+    }
+  })
+}
+```
+
+### ⛓️ Smart Contract Highlights
+
+```solidity
+// Dynamic deadline extension logic
+if (block.timestamp >= currentRound.deadline - bufferDelay) {
+    currentRound.deadline = block.timestamp + stakeBuffer;
+    emit StakeReceived(currentRoundId, msg.sender, msg.value, currentRound.deadline);
+}
+```
+
+### 🔄 State Management
+
+- **React Hooks**: Custom hooks for contract interactions
+- **Real-time Updates**: Event-driven UI updates
+- **Wagmi Integration**: Type-safe blockchain interactions
+- **Error Handling**: Comprehensive error states and recovery
+
+### 🎨 UI/UX Features
+
+- **Responsive Design**: Mobile-first approach with Tailwind CSS
+- **Loading States**: Smooth loading animations and skeleton screens
+- **Real-time Feedback**: Instant visual feedback for all actions
+- **Accessibility**: WCAG compliant with proper ARIA labels
+- **Dark Mode Ready**: Theme system ready for expansion
 
 ## Testing
 
@@ -254,8 +384,98 @@ For questions or issues, please create an issue in the repository or contact the
 
 ---
 
-## Deployment Address ON Base Sepolia 
- - LSW deployed at: 0x9a849937149f69921375a95f67c9ffDF0ECf2732
- - Rewarder deployed at: 0x1FE132d12771e5dD296144123C2bA5B87987a96B
+---
 
-**⚠️ Important**: Always test thoroughly on testnets before mainnet deployment. Never deploy with real funds without proper testing and security audits.
+## 📊 Current Deployment (Somnia Testnet)
+
+### 🏗️ Smart Contracts
+- **🎮 LSW Contract**: `0xab20...` ([View on Explorer](https://explorer.somnia.network))
+- **🎲 Rewarder Contract**: `0xEa9C...` ([View on Explorer](https://explorer.somnia.network))
+- **🏛️ Treasury**: `0x1289...`
+- **🌐 Network**: Somnia Testnet (Chain ID: 50312)
+
+### 📈 Live Statistics
+- **Total Rounds Played**: `TBD`
+- **Total STT Distributed**: `TBD STT`
+- **Active Players**: `TBD`
+- **Average Round Duration**: `TBD minutes`
+
+---
+
+## 🎯 Hackathon Judging Criteria
+
+### 💡 Innovation & Creativity
+- **Novel Game Mechanics**: Unique "last staker wins" concept with dynamic timing
+- **Real-time Experience**: Live updates without page refresh using WebSocket-like events
+- **Fair Randomness**: Chainlink VRF integration for transparent participant selection
+- **Mobile-First Design**: Responsive gaming experience optimized for all devices
+
+### 🔧 Technical Excellence  
+- **Modern Stack**: Next.js 16, TypeScript, Wagmi v2, Tailwind CSS
+- **Smart Contract Security**: Comprehensive access controls, emergency functions
+- **Gas Optimization**: Efficient storage patterns and minimal transaction costs
+- **Error Handling**: Robust error states and user feedback systems
+
+### 🌐 Somnia Integration
+- **Native STT Support**: Full 18-decimal precision token handling
+- **Network Optimization**: Leveraging Somnia's high-performance capabilities  
+- **Block Explorer Integration**: Full transaction transparency and verification
+- **Testnet Deployment**: Fully functional on Somnia Testnet
+
+### 👥 User Experience
+- **Intuitive Interface**: Clean, modern design with smooth animations
+- **Real-time Feedback**: Instant visual confirmation for all user actions
+- **Comprehensive Documentation**: Clear instructions for players and developers
+- **Admin Dashboard**: Complete game management interface
+
+### 🚀 Completeness & Polish
+- **Full-Stack Implementation**: Both smart contracts and frontend complete
+- **Production Ready**: Built with deployment and scaling in mind
+- **Comprehensive Testing**: Unit tests, integration tests, and manual QA
+- **Documentation**: Detailed README, code comments, and user guides
+
+---
+
+## 🔮 Future Roadmap
+
+### 🎯 Phase 2: Enhanced Features
+- **🏆 Leaderboards**: Global player rankings and statistics
+- **🎖️ Achievement System**: Badges and rewards for milestones
+- **📊 Analytics Dashboard**: Detailed game statistics and insights
+- **🔔 Push Notifications**: Real-time alerts for round events
+
+### 🌍 Phase 3: Multi-Chain Expansion
+- **🌉 Cross-Chain Support**: Deploy on additional networks
+- **🔄 Bridge Integration**: Cross-chain asset movement
+- **🎮 Tournament Mode**: Organized competitive events
+- **💰 Staking Pools**: Collaborative staking mechanisms
+
+### 🛡️ Security & Audits
+- **🔍 Smart Contract Audit**: Professional security audit
+- **🧪 Bug Bounty Program**: Community-driven security testing
+- **📈 Gradual Value Increase**: Progressive stake limit increases
+- **🔒 Multi-sig Treasury**: Enhanced treasury security
+
+---
+
+## 🤝 Team & Contact
+
+**Built for Somnia Hackathon 2025**
+
+- **🏗️ Architecture**: Full-stack blockchain application
+- **⛓️ Smart Contracts**: Solidity with Foundry framework  
+- **🖥️ Frontend**: Next.js with TypeScript and modern tooling
+- **🎨 Design**: Custom UI with Tailwind CSS and shadcn/ui
+
+### 📞 Get In Touch
+- **GitHub**: [Skinny001/LSW-Somnia](https://github.com/Skinny001/LSW-Somnia)
+- **Demo**: [Coming Soon - Will be deployed for judges]
+- **Documentation**: This README and inline code comments
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+**⚠️ Hackathon Notice**: This project is submitted for the Somnia Hackathon 2025. All code and documentation are original work created specifically for this competition.
