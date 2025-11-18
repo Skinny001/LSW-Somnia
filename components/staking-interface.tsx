@@ -2,24 +2,37 @@
 
 import { useState, useEffect } from "react"
 import { useContractWrite } from "@/hooks/use-contract-write"
+import { useWaitForTransactionReceipt } from "wagmi"
 import { Button } from "@/components/ui/button"
 import { formatEther, formatHbar} from "@/lib/format-utils"
 import { MINIMUM_STAKE } from "@/lib/somnia-config"
+import { GameEventEmitters } from "@/lib/somnia-sdk"
 
 interface StakingInterfaceProps {
   isStakingAvailable: boolean
   isRoundExpired: boolean
   isActive: boolean
-  stakeAmountUpdated?: number;
+  stakeAmountUpdated?: number
+  roundId?: bigint
 }
 
-export function StakingInterface({ isStakingAvailable, isRoundExpired, isActive, stakeAmountUpdated }: StakingInterfaceProps) {
+export function StakingInterface({ isStakingAvailable, isRoundExpired, isActive, stakeAmountUpdated, roundId }: StakingInterfaceProps) {
   const { executeStake, executeStartNewRound, isLoading, error, hash, isConnected, address } = useContractWrite()
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [localError, setLocalError] = useState<string | null>(null)
   const [showWalletPrompt, setShowWalletPrompt] = useState(false)
   const [isAmountValid, setIsAmountValid] = useState<boolean>(true)
   const [minimumStake, setMinimumStake] = useState<bigint>(MINIMUM_STAKE)
+  const [pendingStakeAmount, setPendingStakeAmount] = useState<bigint | null>(null)
+  
+  // Wait for transaction confirmation
+  const { 
+    data: receipt, 
+    isSuccess: isConfirmed,
+    isLoading: isConfirming 
+  } = useWaitForTransactionReceipt({
+    hash: hash as `0x${string}` | undefined,
+  })
   // Fetch minimum stake from contract on mount and when round changes
   useEffect(() => {
     let mounted = true
@@ -36,13 +49,54 @@ export function StakingInterface({ isStakingAvailable, isRoundExpired, isActive,
     return () => { mounted = false }
   }, [isActive, isRoundExpired, stakeAmountUpdated])
 
+  // Handle transaction confirmation
   useEffect(() => {
-    if (hash) {
-      setSuccessMessage(`Transaction submitted: ${hash.slice(0, 10)}...`)
-      const timer = setTimeout(() => setSuccessMessage(null), 5000)
+    if (isConfirmed && receipt && pendingStakeAmount && address && roundId) {
+      console.log("✅ Transaction confirmed! Adding stake activity to feed")
+      
+      // Add confirmed activity to feed
+      if (typeof window !== 'undefined' && (window as any).addStakeActivity) {
+        console.log('⚡ Adding confirmed stake activity for:', address)
+        ;(window as any).addStakeActivity(address, pendingStakeAmount, roundId)
+      }
+      
+      // Emit SDK event for network insights (non-blocking)
+      console.log('🚀 Emitting playerStaked SDK event:', {
+        address,
+        roundId: roundId.toString(),
+        amount: pendingStakeAmount.toString()
+      })
+      GameEventEmitters.playerStaked(
+        address,
+        roundId.toString(),
+        pendingStakeAmount
+      ).then(() => {
+        console.log('✅ SDK playerStaked event emitted successfully')
+      }).catch(err => {
+        console.error("❌ SDK event emission failed:", err)
+      })
+      
+      // Clear pending state and show success
+      setPendingStakeAmount(null)
+      setSuccessMessage(`Stake confirmed! Amount: ${formatHbar(pendingStakeAmount)} STT`)
+    }
+  }, [isConfirmed, receipt, pendingStakeAmount, address, roundId])
+  
+  // Separate effect to handle success message timeout
+  useEffect(() => {
+    if (successMessage) {
+      const timer = setTimeout(() => setSuccessMessage(null), 2000)
       return () => clearTimeout(timer)
     }
-  }, [hash])
+  }, [successMessage])
+
+  useEffect(() => {
+    if (hash && !isConfirmed) {
+      setSuccessMessage(`Transaction submitted: ${hash.slice(0, 10)}... Waiting for confirmation`)
+      const timer = setTimeout(() => setSuccessMessage(null), 10000)
+      return () => clearTimeout(timer)
+    }
+  }, [hash, isConfirmed])
 
   useEffect(() => {
     if (error) {
@@ -67,11 +121,17 @@ export function StakingInterface({ isStakingAvailable, isRoundExpired, isActive,
     }
     setLocalError(null)
     setSuccessMessage(null)
+    
+    // Store the stake amount for when transaction confirms
+    setPendingStakeAmount(minimumStake)
+    
     try {
       const result = await executeStake(minimumStake)
-      console.log("Stake transaction result:", result)
+      console.log("Stake transaction submitted:", result)
+      console.log("⏳ Waiting for transaction confirmation before adding activity...")
     } catch (err) {
       console.log("Stake transaction error:", err)
+      setPendingStakeAmount(null) // Clear pending state on error
     }
   }
 
@@ -142,7 +202,7 @@ export function StakingInterface({ isStakingAvailable, isRoundExpired, isActive,
           )} */}
           <Button
             onClick={handleStake}
-            disabled={isLoading || !isConnected || !isAmountValid}
+            disabled={isLoading || isConfirming || !isConnected || !isAmountValid}
             className="w-full bg-accent hover:bg-accent/90 text-accent-foreground"
             size="lg"
           >
@@ -150,7 +210,9 @@ export function StakingInterface({ isStakingAvailable, isRoundExpired, isActive,
               ? "Connect Wallet to Stake"
               : isLoading
                 ? "Processing..."
-                : `Stake ${formatHbar(minimumStake)} STT`}
+                : isConfirming
+                  ? "Confirming Transaction..."
+                  : `Stake ${formatHbar(minimumStake)} STT`}
           </Button>
         </div>
       )}

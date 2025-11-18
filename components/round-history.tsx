@@ -1,255 +1,256 @@
 "use client"
-import React, { useState, useEffect, useCallback } from "react"
-import { useAccount } from "wagmi"
-import { formatEther } from "@/lib/format-utils"
-import { watchRoundEndedEvents } from "@/lib/contract-service"
-import { Button } from "./ui/button"
-import { RefreshCw } from "lucide-react"
 
-interface CompletedRound {
+import { useState, useCallback, useEffect } from 'react'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Separator } from '@/components/ui/separator'
+import { Trophy, Users, Clock, DollarSign, RefreshCcw } from 'lucide-react'
+import { useContractEvents, type RoundEndedEvent } from '@/hooks/use-contract-events'
+
+// Simple interface for completed rounds
+export interface CompletedRound {
   roundId: bigint
   winner: string
   totalAmount: bigint
-  randomWinners?: string[]
-  winnerAmount?: bigint
-  participantAmount?: bigint
-  treasuryAmount?: bigint
   timestamp: number
+  source: string
+  gameId: string
 }
 
-export function RoundHistory() {
-  const { address: walletAddress } = useAccount()
-  const [rounds, setRounds] = useState<CompletedRound[]>([])
-  const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
+export default function RoundHistory() {
+  const [networkRounds, setNetworkRounds] = useState<CompletedRound[]>([])
+  const [lastRefresh, setLastRefresh] = useState<Date>(new Date())
 
-  // Helper functions
-  const formatAddress = (addr: string) => {
-    if (!addr || addr === "0x0000000000000000000000000000000000000000") return "None"
-    return `${addr.slice(0, 6)}...${addr.slice(-4)}`
-  }
+  // Format wallet address for display
+  const formatWalletAddress = useCallback((address: string) => {
+    if (!address || address === "Round Completed") return address
+    return `${address.slice(0, 6)}...${address.slice(-4)}`
+  }, [])
 
-  const formatTimeAgo = (timestamp: number) => {
-    const seconds = Math.floor((Date.now() - timestamp) / 1000)
-    if (seconds < 60) return `${seconds}s ago`
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`
-    return `${Math.floor(seconds / 86400)}d ago`
-  }
-
-  // Function to add a new round to the history
-  const addRoundToHistory = useCallback((roundData: CompletedRound) => {
-    setRounds(prevRounds => {
+  // Add round to history when RoundEnded event occurs
+  const handleRoundEnded = useCallback((event: RoundEndedEvent) => {
+    console.log("🎯 Round ended event received:", event)
+    
+    // Validate the event data before adding to history
+    const isValidRound = event.winner && 
+                        event.winner !== '0x0000000000000000000000000000000000000000' && 
+                        event.totalAmount && 
+                        BigInt(event.totalAmount) > 0
+    
+    if (!isValidRound) {
+      console.log("🚫 Ignoring invalid round event (dummy data):", event)
+      return
+    }
+    
+    const roundData: CompletedRound = {
+      roundId: event.roundId,
+      winner: event.winner,
+      totalAmount: event.totalAmount,
+      timestamp: event.timestamp,
+      source: 'contract-event',
+      gameId: `round-${event.roundId}`
+    }
+    
+    console.log("📺 Adding valid completed round to history:", roundData)
+    
+    setNetworkRounds(prevRounds => {
       // Check if round already exists
       const exists = prevRounds.some(r => r.roundId === roundData.roundId)
-      if (exists) return prevRounds
+      if (exists) {
+        console.log("🔄 Round already exists, skipping duplicate")
+        return prevRounds
+      }
       
-      console.log(`📝 Adding Round ${roundData.roundId} to history:`, roundData)
-      
-      // Add new round and sort by roundId descending
+      // Add new round and sort by timestamp descending
       const newRounds = [roundData, ...prevRounds]
-      return newRounds.sort((a, b) => Number(b.roundId) - Number(a.roundId)).slice(0, 10) // Keep last 10 rounds
+      return newRounds.sort((a, b) => b.timestamp - a.timestamp).slice(0, 10)
     })
+    
     setLastRefresh(new Date())
   }, [])
+
+  // Use the existing contract events hook
+  useContractEvents(
+    undefined, // onStake
+    undefined, // onRoundStarted
+    handleRoundEnded // onRoundEnded
+  )
+
+  // Load initial historical data on mount (DISABLED - only load via manual refresh)
+  useEffect(() => {
+    console.log("📚 Round History mounted - will only show new rounds from contract events")
+    console.log("📚 Use 'Refresh' button to manually load historical data")
+    
+    // Component starts clean - no automatic historical data loading
+    // This prevents showing dummy/empty rounds on startup
+    
+    return () => {
+      // Cleanup if needed
+    }
+  }, []) // Run once on mount
 
   // Clear history (for testing)
   const clearHistory = useCallback(() => {
     console.log("🧹 Clearing round history")
-    setRounds([])
+    setNetworkRounds([])
     setLastRefresh(new Date())
   }, [])
 
-  // Set up real-time event listeners
-  useEffect(() => {
-    let mounted = true
-    let roundEndedUnsubscribe: (() => void) | null = null
-
-    console.log("🔌 Setting up round history event listeners...")
-
-    const setupEventListeners = async () => {
-      try {
-        // Listen for RoundEnded events
-        roundEndedUnsubscribe = await watchRoundEndedEvents((roundId, winner, totalAmount) => {
-          console.log(`🎉 Round ${roundId} ended! Winner: ${winner}, Prize: ${formatEther(totalAmount)} STT`)
-          
-          if (mounted) {
-            const newRound: CompletedRound = {
-              roundId,
-              winner,
-              totalAmount,
-              timestamp: Date.now(),
-              // Calculate estimated rewards (70/20/10 split)
-              winnerAmount: (totalAmount * BigInt(70)) / BigInt(100), // 70%
-              participantAmount: (totalAmount * BigInt(20)) / BigInt(100), // 20%
-              treasuryAmount: (totalAmount * BigInt(10)) / BigInt(100), // 10%
-              // randomWinners will be updated when RewardsDistributed event fires
-            }
-            addRoundToHistory(newRound)
-          }
-        })
+  // Refresh history
+  const refreshHistory = useCallback(async () => {
+    try {
+      console.log("🔄 Refreshing round history...")
+      const { fetchRecentRounds } = await import("@/lib/contract-service")
+      const historicalRounds = await fetchRecentRounds(10)
+      
+      console.log("🔄 Raw refresh data:", historicalRounds)
+      
+      // Filter out empty/dummy rounds
+      const validRounds = historicalRounds.filter((round: any) => {
+        const isValid = round.winner && 
+                       round.winner !== '0x0000000000000000000000000000000000000000' && 
+                       round.totalAmount && 
+                       BigInt(round.totalAmount) > 0
         
-        console.log("✅ Round history event listeners set up successfully")
-        
-      } catch (err) {
-        console.error("❌ Failed to set up round history event listeners:", err)
-      }
+        if (!isValid) {
+          console.log(`🚫 Filtering out invalid refresh round:`, round)
+        }
+        return isValid
+      })
+      
+      const convertedRounds = validRounds.map((round: any): CompletedRound => ({
+        roundId: round.roundId,
+        winner: round.winner,
+        totalAmount: round.totalAmount,
+        timestamp: round.timestamp,
+        source: 'contract-refresh',
+        gameId: `refresh-${round.roundId}`
+      }))
+      
+      setNetworkRounds(convertedRounds)
+      setLastRefresh(new Date())
+      console.log(`✅ Refreshed with ${convertedRounds.length} valid rounds`)
+    } catch (error) {
+      console.error("❌ Failed to refresh history:", error)
     }
-
-    setupEventListeners()
-
-    return () => {
-      console.log("🔌 Cleaning up round history event listeners")
-      mounted = false
-      if (roundEndedUnsubscribe) {
-        roundEndedUnsubscribe()
-      }
-    }
-  }, [addRoundToHistory])
+  }, [])
 
   return (
-    <div className="bg-card border border-border rounded-lg p-6 space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold">Round History</h3>
-        <div className="flex items-center gap-2">
-          {lastRefresh && (
-            <span className="text-xs text-muted-foreground">
-              Last updated: {lastRefresh.toLocaleTimeString()}
-            </span>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={clearHistory}
-            className="flex items-center gap-2"
-          >
-            <RefreshCw className="w-4 h-4" />
-            Clear
-          </Button>
+    <Card className="w-full">
+      <CardHeader className="pb-4">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-xl font-bold flex items-center gap-2">
+            <Trophy className="h-5 w-5 text-yellow-500" />
+            Round History
+          </CardTitle>
+          <div className="flex items-center gap-2">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={refreshHistory}
+              className="flex items-center gap-1"
+            >
+              <RefreshCcw className="h-4 w-4" />
+              Refresh
+            </Button>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={clearHistory}
+              className="text-red-600 hover:text-red-700"
+            >
+              Clear
+            </Button>
+            {/* <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={async () => {
+                const { fetchRecentRounds } = await import("@/lib/contract-service")
+                const raw = await fetchRecentRounds(5)
+                console.log("🔍 Raw contract data:", raw)
+                alert(`Found ${raw.length} rounds. Check console for details.`)
+              }}
+              className="text-blue-600"
+            >
+              Debug
+            </Button> */}
+          </div>
         </div>
-      </div>
-      
-      <div className="space-y-3 max-h-96 overflow-y-auto">
-        {rounds.length === 0 ? (
-          <div className="text-center py-8">
-            <p className="text-sm text-muted-foreground">
-              🎲 No completed rounds yet.
-            </p>
-            <p className="text-xs text-muted-foreground mt-2">
-              Round history will appear here automatically when rounds end.
-            </p>
+        <div className="flex items-center gap-4 text-sm text-muted-foreground">
+          <span>Total Rounds: {networkRounds.length}</span>
+          <span>Last Updated: {lastRefresh.toLocaleTimeString()}</span>
+        </div>
+      </CardHeader>
+
+      <CardContent className="space-y-4">
+        {networkRounds.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">
+            <Trophy className="mx-auto h-12 w-12 opacity-50 mb-3" />
+            <p className="text-lg font-medium">No completed rounds yet</p>
+            <p className="text-sm">Round history will appear here when rounds are completed</p>
           </div>
         ) : (
-          rounds.map((round: CompletedRound) => {
-            const isWinner = walletAddress && round.winner?.toLowerCase() === walletAddress.toLowerCase()
-            const isRandomWinner = walletAddress && round.randomWinners?.some(
-              (addr: string) => addr?.toLowerCase() === walletAddress.toLowerCase()
-            )
-            
-            return (
+          <div className="space-y-3">
+            {networkRounds.map((round) => (
               <div
-                key={round.roundId.toString()}
-                className={`p-4 bg-background rounded border ${isWinner ? 'border-green-500 bg-green-50/30' : 'border-border'}`}
+                key={`${round.gameId}-${round.roundId}`}
+                className="p-4 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
               >
-                {/* Round Header */}
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-sm font-semibold text-foreground">
-                    Round #{round.roundId.toString()}
-                  </span>
-                  <span className="text-xs text-muted-foreground ml-auto">
-                    {formatTimeAgo(round.timestamp)}
-                  </span>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-3">
+                    <Badge variant="secondary" className="font-mono">
+                      #{round.roundId.toString()}
+                    </Badge>
+                    <div className="flex items-center gap-1 text-green-600">
+                      <Trophy className="h-4 w-4" />
+                      <span className="font-medium">Round Won</span>
+                    </div>
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {new Date(round.timestamp).toLocaleString()}
+                  </div>
                 </div>
-                
-                {/* Winner Info */}
+
                 <div className="space-y-2">
-                  <div className="text-sm">
-                    <span className="font-medium">🏆 Winner:</span>{" "}
-                    <span className="font-mono text-green-600 font-bold" title={round.winner}>
-                      {formatAddress(round.winner)}
-                    </span>
-                    {isWinner && (
-                      <span className="ml-2 px-2 py-0.5 rounded bg-green-600 text-white text-xs font-bold">
-                        You Won! 🎉
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Users className="h-4 w-4 text-blue-500" />
+                      <span className="text-sm font-medium">Winner:</span>
+                      <span className="font-mono text-sm">
+                        {formatWalletAddress(round.winner)}
                       </span>
-                    )}
+                    </div>
                   </div>
-                  
-                  <div className="text-sm">
-                    <span className="font-medium">💰 Total Prize:</span>{" "}
-                    <span className="font-bold text-accent">
-                      {formatEther(round.totalAmount)} STT
+
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <DollarSign className="h-4 w-4 text-green-500" />
+                      <span className="text-sm font-medium">Prize Pool:</span>
+                      <span className="font-bold text-green-600">
+                        {(Number(round.totalAmount) / 1e18).toFixed(4)} STT
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-gray-500" />
+                    <span className="text-xs text-muted-foreground">
+                      Source: {round.source}
                     </span>
                   </div>
-                  
-                  {/* Reward Breakdown */}
-                  {round.winnerAmount && (
-                    <div className="text-xs space-y-1 mt-2 p-2 bg-muted rounded">
-                      <div>
-                        <span className="font-medium">🏆 Winner Share (70%):</span>{" "}
-                        <span className="text-green-600 font-bold">
-                          {formatEther(round.winnerAmount)} STT
-                        </span>
-                      </div>
-                      
-                      <div>
-                        <span className="font-medium">🎲 Random Participants (20%):</span>{" "}
-                        <span className="text-blue-600 font-bold">
-                          {formatEther(round.participantAmount || BigInt(0))} STT
-                        </span>
-                      </div>
-                      
-                      <div>
-                        <span className="font-medium">🏛️ Treasury (10%):</span>{" "}
-                        <span className="text-yellow-600 font-bold">
-                          {formatEther(round.treasuryAmount || BigInt(0))} STT
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                  
-                  {/* Random Winners (when available) */}
-                  {round.randomWinners && round.randomWinners.length > 0 && (
-                    <div className="mt-2">
-                      <span className="text-xs font-medium">🎲 Random Winners (20% share):</span>
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {round.randomWinners.map((addr: string, i: number) => (
-                          <span
-                            key={i}
-                            className={`text-xs px-2 py-1 rounded font-mono ${
-                              walletAddress && addr?.toLowerCase() === walletAddress.toLowerCase()
-                                ? 'bg-blue-100 text-blue-700 font-bold border border-blue-300'
-                                : 'bg-muted text-muted-foreground'
-                            }`}
-                            title={addr}
-                          >
-                            {formatAddress(addr)}
-                          </span>
-                        ))}
-                      </div>
-                      {isRandomWinner && (
-                        <span className="inline-block mt-1 px-2 py-0.5 rounded bg-blue-600 text-white text-xs font-bold">
-                          You're a Random Winner! 🎲
-                        </span>
-                      )}
-                    </div>
-                  )}
-                  
-                  {/* Status */}
-                  {!round.randomWinners || round.randomWinners.length === 0 ? (
-                    <div className="text-xs text-orange-600 mt-2">
-                      ⏳ Waiting for rewards distribution...
-                    </div>
-                  ) : (
-                    <div className="text-xs text-green-600 mt-2">
-                      ✅ Rewards distributed
-                    </div>
-                  )}
                 </div>
               </div>
-            )
-          })
+            ))}
+          </div>
         )}
-      </div>
-    </div>
+        
+        <Separator className="my-4" />
+        
+        <div className="text-xs text-muted-foreground text-center">
+          Showing most recent completed rounds • Updates automatically via contract events
+        </div>
+      </CardContent>
+    </Card>
   )
 }

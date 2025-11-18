@@ -1,55 +1,6 @@
 "use client"
 import { formatEther, formatHbar} from "@/lib/format-utils"
-
-// ...existing code...
-//         ) : (
-//           liveActivities.map((activity) => (
-//             <div
-//               key={activity.id}
-//               className="flex items-start gap-3 p-3 bg-background rounded border border-border/50 hover:border-border transition-colors"
-//             >
-//               <div className="text-lg mt-0.5">{getActivityIcon(activity.type)}</div>
-//               <div className="flex-1 min-w-0">
-//                 {activity.type === "stake" && (
-//                   <div>
-//                     <p className="text-sm font-medium text-foreground">
-//                       <span className="text-accent">{formatAddress(activity.data.staker)}</span> staked
-//                     </p>
-//                     <p className="text-xs text-muted-foreground">
-//                       {activity.data.amount ? formatEther(activity.data.amount) : "0"} HBAR
-//                     </p>
-//                   </div>
-//                 )}
-//                 {activity.type === "round_end" && (
-//                   <div>
-//                     <p className="text-sm font-medium text-foreground">
-//                       <span className="text-accent">{formatAddress(activity.data.winner)}</span> won the round
-//                     </p>
-//                     <p className="text-xs text-muted-foreground">
-//                       Prize: {formatEther(activity.data.totalAmount)} HBAR
-//                     </p>
-//                   </div>
-//                 )}
-//                 {activity.type === "round_start" && (
-//                   <div>
-//                     <p className="text-sm font-medium text-foreground">Round started</p>
-//                     <p className="text-xs text-muted-foreground">Round #{activity.data.roundId?.toString()}</p>
-//                   </div>
-//                 )}
-//               </div>
-//               <span className="text-xs text-muted-foreground whitespace-nowrap">{formatTime(activity.timestamp)}</span>
-//             </div>
-//           ))
-//         )}
-//       </div>
-//     </div>
-//   )
-// }
-
-
-
-
-
+import { subscribeToNetworkEvents, type NetworkActivity } from "@/lib/somnia-sdk"
 import React, { useEffect, useState } from "react"
 import { form } from "viem/chains"
 
@@ -58,13 +9,60 @@ interface Activity {
   type: "stake" | "round_start" | "round_end"
   data: any
   timestamp: number
+  source?: "local" | "network" // Track source of activity
 }
 
 interface ActivityFeedProps {
-  activities: Activity[]
+  currentRoundId?: bigint // For round-specific filtering
+  onStakeActivity?: (activity: Activity) => void // Callback for immediate stake display
 }
 
-export function ActivityFeed({ activities }: ActivityFeedProps) {
+export function ActivityFeed({ currentRoundId, onStakeActivity }: ActivityFeedProps) {
+  const [activities, setActivities] = useState<Activity[]>([])
+
+  // Function to add immediate stake activity (called directly from staking)
+  const addImmediateActivity = (staker: string, amount: bigint, roundId: bigint) => {
+    const activity: Activity = {
+      id: `immediate-stake-${Date.now()}-${Math.random()}`,
+      type: "stake",
+      data: {
+        roundId: roundId,
+        staker: staker,
+        amount: amount.toString(),
+        timestamp: Date.now()
+      },
+      timestamp: Date.now(),
+      source: "local"
+    }
+    
+    console.log('⚡ Adding immediate stake activity:', activity)
+    setActivities(prev => [activity, ...prev.slice(0, 9)])
+    
+    // Also call callback if provided
+    if (onStakeActivity) {
+      onStakeActivity(activity)
+    }
+  }
+
+  // Expose the function globally so StakingInterface can call it
+  React.useEffect(() => {
+    if (typeof window !== 'undefined') {
+      (window as any).addStakeActivity = addImmediateActivity
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        delete (window as any).addStakeActivity
+      }
+    }
+  }, [currentRoundId])
+
+  // Clear activities when round changes
+  useEffect(() => {
+    if (currentRoundId) {
+      console.log(`📋 Round changed to ${currentRoundId} - clearing SDK activities`)
+      setActivities([])
+    }
+  }, [currentRoundId])
 
   // Memoize filteredActivities to prevent infinite update loop
   const filteredActivities = React.useMemo(() => {
@@ -75,19 +73,100 @@ export function ActivityFeed({ activities }: ActivityFeedProps) {
           return false
         }
       }
+      // Only show activities for current round
+      if (currentRoundId && activity.data?.roundId && BigInt(activity.data.roundId) !== currentRoundId) {
+        return false
+      }
       return true
     })
-  }, [activities])
+  }, [activities, currentRoundId])
 
-  const [liveActivities, setLiveActivities] = useState<Activity[]>(filteredActivities)
 
+
+  // Set up SDK event subscriptions for activities
   useEffect(() => {
-    setLiveActivities(filteredActivities)
-    const interval = setInterval(() => {
-      setLiveActivities([...filteredActivities])
-    }, 10000)
-    return () => clearInterval(interval)
-  }, [activities, filteredActivities])
+    let mounted = true
+    let stakeUnsubscribe: (() => void) | null = null
+    let roundUnsubscribe: (() => void) | null = null
+
+    const setupSDKSubscriptions = async () => {
+      try {
+        console.log('🚀 Setting up SDK subscriptions for round:', currentRoundId)
+        
+        // Subscribe to stake events
+        stakeUnsubscribe = await subscribeToNetworkEvents('PlayerStaked', (event: any) => {
+          console.log('🔥🔥🔥 RAW STAKE SDK EVENT RECEIVED:', JSON.stringify(event, null, 2))
+          if (mounted && currentRoundId) {
+            console.log('📡 Processing SDK Stake event for round:', currentRoundId, event)
+            
+            const activity: Activity = {
+              id: `sdk-stake-${event.timestamp || Date.now()}-${Math.random()}`,
+              type: "stake",
+              data: {
+                roundId: currentRoundId,
+                staker: event.address || event.player || event.data?.address,
+                amount: event.amount || event.data?.amount,
+                timestamp: event.timestamp || Date.now()
+              },
+              timestamp: event.timestamp || Date.now(),
+              source: "network"
+            }
+            
+            console.log('📋 Adding activity:', activity)
+            setActivities(prev => {
+              const newActivities = [activity, ...prev.slice(0, 9)]
+              console.log('📋 Updated activities:', newActivities.length)
+              return newActivities
+            })
+          } else {
+            console.log('⚠️ SDK event ignored - mounted:', mounted, 'currentRoundId:', currentRoundId)
+          }
+        })
+
+        // Subscribe to round events
+        roundUnsubscribe = await subscribeToNetworkEvents('RoundWon', (event: any) => {
+          if (mounted && currentRoundId) {
+            console.log('📡 SDK Round event received:', event)
+            
+            const activity: Activity = {
+              id: `sdk-round-${event.timestamp || Date.now()}-${Math.random()}`,
+              type: "round_end",
+              data: {
+                roundId: currentRoundId,
+                winner: event.winner,
+                totalAmount: event.totalAmount,
+                timestamp: event.timestamp || Date.now()
+              },
+              timestamp: event.timestamp || Date.now(),
+              source: "network"
+            }
+            
+            setActivities(prev => [activity, ...prev.slice(0, 9)])
+          }
+        })
+
+        console.log('✅ SDK activity subscriptions set up for round:', currentRoundId)
+        
+        // Debug: Log subscription status
+        console.log('🔍 Subscription status:', {
+          stakeUnsubscribe: !!stakeUnsubscribe,
+          roundUnsubscribe: !!roundUnsubscribe,
+          mounted,
+          currentRoundId
+        })
+      } catch (error) {
+        console.error('❌ Failed to set up SDK activity subscriptions:', error)
+      }
+    }
+
+    setupSDKSubscriptions()
+
+    return () => {
+      mounted = false
+      if (stakeUnsubscribe) stakeUnsubscribe()
+      if (roundUnsubscribe) roundUnsubscribe()
+    }
+  }, [currentRoundId])
 
   const formatTime = (timestamp: number) => {
     const seconds = Math.floor((Date.now() - timestamp) / 1000)
@@ -120,44 +199,62 @@ export function ActivityFeed({ activities }: ActivityFeedProps) {
     return `${addressStr.slice(0, 6)}...${addressStr.slice(-4)}`
   }
 
-  const getActivityIcon = (type: string) => {
-    switch (type) {
-      case "stake":
-        return "📍"
-      case "round_end":
-        return "🏆"
-      case "round_start":
-        return "🎮"
-      default:
-        return "•"
-    }
+  const getActivityIcon = (type: string, source?: string) => {
+    const baseIcon = (() => {
+      switch (type) {
+        case "stake":
+          return "📍"
+        case "round_end":
+          return "🏆"
+        case "round_start":
+          return "🎮"
+        default:
+          return "•"
+      }
+    })()
+    
+    // Add network indicator for network activities
+    return source === 'network' ? `🌐 ${baseIcon}` : baseIcon
   }
 
   return (
     <div className="bg-card border border-border rounded-lg p-6 space-y-4">
-      <h3 className="text-lg font-semibold">Live Activity</h3>
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold">Live Activity</h3>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <div className="flex items-center gap-1">
+            <span>📡 Somnia SDK</span>
+            <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+          </div>
+        </div>
+      </div>
       <div className="space-y-3 max-h-96 overflow-y-auto">
-        {liveActivities.length === 0 ? (
+        {filteredActivities.length === 0 ? (
           <div className="text-center py-8">
             <p className="text-sm text-muted-foreground">Waiting for activity...</p>
           </div>
         ) : (
-          liveActivities.map((activity) => (
+          filteredActivities.map((activity) => (
             <div
               key={activity.id}
               className="flex items-start gap-3 p-3 bg-background rounded border border-border/50 hover:border-border transition-colors"
             >
-              <div className="text-lg mt-0.5">{getActivityIcon(activity.type)}</div>
+              <div className="text-lg mt-0.5">{getActivityIcon(activity.type, activity.source)}</div>
               <div className="flex-1 min-w-0">
                 {activity.type === "stake" && (
                   <div>
                     <p className="text-sm font-medium text-foreground">
                       <span 
-                        className="text-accent font-mono cursor-pointer hover:text-accent/80" 
+                        className="text-accent font-mono text-xs cursor-pointer hover:text-accent/80" 
                         title={activity.data?.staker || "No address available"}
                       >
                         {formatAddress(activity.data?.staker || activity.data?.user || activity.data?.address)}
                       </span> staked
+                      {activity.source === 'network' && (
+                        <span className="ml-1 px-1 py-0.5 bg-blue-100 text-blue-700 text-xs rounded">
+                          🌐 Network
+                        </span>
+                      )}
                     </p>
                     <p className="text-xs text-muted-foreground">
                       Amount: <span className="font-semibold text-green-600">
@@ -176,7 +273,7 @@ export function ActivityFeed({ activities }: ActivityFeedProps) {
                   <div>
                     <p className="text-sm font-medium text-foreground">
                       🎉 <span 
-                        className="text-green-600 font-mono font-bold cursor-pointer hover:text-green-500" 
+                        className="text-green-600 font-mono font-bold text-xs cursor-pointer hover:text-green-500" 
                         title={activity.data.winner}
                       >
                         {formatAddress(activity.data.winner)}
@@ -196,7 +293,7 @@ export function ActivityFeed({ activities }: ActivityFeedProps) {
                           {activity.data.stakers.slice(0, 10).map((staker: string, index: number) => (
                             <span
                               key={index}
-                              className={`text-xs px-2 py-0.5 rounded font-mono ${
+                              className={`text-[10px] px-2 py-0.5 rounded font-mono ${
                                 staker.toLowerCase() === activity.data.winner.toLowerCase()
                                   ? 'bg-green-100 text-green-700 font-bold border border-green-300'
                                   : 'bg-muted text-muted-foreground'
@@ -223,7 +320,7 @@ export function ActivityFeed({ activities }: ActivityFeedProps) {
                           {activity.data.randomWinners.map((winner: string, index: number) => (
                             <span
                               key={index}
-                              className="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-mono font-semibold border border-blue-300"
+                              className="text-[10px] px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-mono font-semibold border border-blue-300"
                               title={winner}
                             >
                               {formatAddress(winner)}
@@ -248,7 +345,7 @@ export function ActivityFeed({ activities }: ActivityFeedProps) {
                   </div>
                 )}
               </div>
-              <span className="text-xs text-muted-foreground whitespace-nowrap">
+              <span className="text-[10px] text-muted-foreground whitespace-nowrap">
                 {formatTime(activity.timestamp)}
               </span>
             </div>

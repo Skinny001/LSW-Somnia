@@ -36,9 +36,10 @@ export function useHistoricalStakeEvents(roundId: bigint | undefined) {
         // Get the latest block number
         const blockNumber = await publicClient.getBlockNumber()
 
-        // Fetch past StakeReceived events for the current round
-        // Look back 10000 blocks (or from block 0 if fewer blocks exist)
-        const fromBlock = blockNumber > BigInt(10000) ? blockNumber - BigInt(10000) : BigInt(0)
+        // Somnia RPC has 1000 block limit, so we'll use chunked queries
+        const MAX_BLOCK_RANGE = 900 // Stay under 1000 limit with safety margin
+        const totalRange = 2000 // Reduced range to avoid too many requests (was 10000)
+        const fromBlock = blockNumber > BigInt(totalRange) ? blockNumber - BigInt(totalRange) : BigInt(0)
 
         // Get the event ABI
         const stakeReceivedEvent = LSW_ABI.find(
@@ -49,13 +50,39 @@ export function useHistoricalStakeEvents(roundId: bigint | undefined) {
           throw new Error("StakeReceived event not found in ABI")
         }
 
-        // Fetch logs
-        const logs = await publicClient.getLogs({
-          address: LSW_CONTRACT_ADDRESS as `0x${string}`,
-          event: stakeReceivedEvent,
-          fromBlock,
-          toBlock: blockNumber,
-        })
+        // Helper function to chunk log queries
+        const getLogsChunked = async (): Promise<any[]> => {
+          const allLogs: any[] = []
+          let currentFromBlock = fromBlock
+          
+          while (currentFromBlock < blockNumber) {
+            const chunkToBlock = currentFromBlock + BigInt(MAX_BLOCK_RANGE) > blockNumber 
+              ? blockNumber 
+              : currentFromBlock + BigInt(MAX_BLOCK_RANGE)
+            
+            try {
+              const chunkLogs = await publicClient.getLogs({
+                address: LSW_CONTRACT_ADDRESS as `0x${string}`,
+                event: stakeReceivedEvent,
+                fromBlock: currentFromBlock,
+                toBlock: chunkToBlock,
+              })
+              allLogs.push(...chunkLogs)
+              
+              // Move to next chunk
+              currentFromBlock = chunkToBlock + BigInt(1)
+            } catch (err) {
+              console.warn(`Failed to fetch logs for block range ${currentFromBlock}-${chunkToBlock}:`, err)
+              // Continue with next chunk instead of failing entirely
+              currentFromBlock = chunkToBlock + BigInt(1)
+            }
+          }
+          
+          return allLogs
+        }
+
+        // Fetch logs using chunked approach
+        const logs = await getLogsChunked()
 
         // Decode and filter logs
         const events: StakeEvent[] = []

@@ -1,112 +1,33 @@
 "use client"
 
 import { useContractRead } from "@/hooks/use-contract-read"
-import { useContractEvents, type StakeEvent, type RoundEndedEvent } from "@/hooks/use-contract-events"
-import { useHistoricalStakeEvents } from "@/hooks/use-historical-stake-events"
-import { useState, useCallback, useEffect } from "react"
+import { useState, useEffect } from "react"
 import { TimerDisplay } from "@/components/timer-display"
 import { PrizePoolCard } from "@/components/prize-pool-card"
 import { StakingInterface } from "@/components/staking-interface"
 import { ActivityFeed } from "@/components/activity-feed"
 import { GameStatus } from "@/components/game-status"
-import { RoundHistory } from "@/components/round-history"
+import RoundHistory from "@/components/round-history"
 import { WalletButton } from "@/components/wallet-button"
 import { useOwnerCheck } from "@/hooks/use-owner-check"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
 
+
 export default function Home() {
   const [stakeAmountUpdated, setStakeAmountUpdated] = useState(0)
   const { roundInfo, timeRemaining, timeUntilStaking, isStakingAvailable, loading, error } = useContractRead()
   const { isOwner, loading: ownerLoading, isConnected } = useOwnerCheck()
-  const { stakeEvents: historicalStakeEvents } = useHistoricalStakeEvents(roundInfo?.roundId)
-  type ActivityType = "stake" | "round_end" | "round_start"
-  type Activity = { id: string; type: ActivityType; data: any; timestamp: number }
-  const [activities, setActivities] = useState<Activity[]>([])
+
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
     setMounted(true)
   }, [])
 
-  // Populate activities with historical stake events when they load
-  useEffect(() => {
-    if (historicalStakeEvents && historicalStakeEvents.length > 0) {
-      setActivities((prev) => {
-        // Convert historical stake events to activities and merge with existing
-        const historicalActivities: Activity[] = historicalStakeEvents.map((event) => ({
-          id: event.id,
-          type: "stake" as const,
-          data: {
-            roundId: event.roundId,
-            staker: event.staker,
-            amount: event.amount,
-            timestamp: event.timestamp,
-          },
-          timestamp: event.timestamp,
-        }))
 
-        // Merge historical and real-time events, removing duplicates
-        const merged = [...historicalActivities]
-        const historicalIds = new Set(historicalActivities.map((a) => a.id))
 
-        // Add real-time events that aren't in historical
-        prev.forEach((activity) => {
-          if (!historicalIds.has(activity.id)) {
-            merged.push(activity)
-          }
-        })
 
-        // Sort by timestamp descending
-        merged.sort((a, b) => b.timestamp - a.timestamp)
-
-        // Keep only the most recent 10
-        return merged.slice(0, 10)
-      })
-    }
-  }, [historicalStakeEvents])
-
-  const handleStakeEvent = useCallback((event: StakeEvent) => {
-    setActivities((prev) => {
-      let baseId = `stake-${event.roundId}-${event.timestamp}`
-      let id = baseId
-      // Ensure uniqueness in the current list
-      if (prev.some(a => a.id === id)) {
-        id = `${baseId}-${Math.floor(Math.random() * 100000)}`
-      }
-      return [
-        {
-          id,
-          type: "stake",
-          data: event,
-          timestamp: event.timestamp,
-        },
-        ...prev.slice(0, 9),
-      ]
-    })
-  }, [])
-
-  const handleRoundEndedEvent = useCallback((event: RoundEndedEvent) => {
-    setActivities((prev) => {
-      let baseId = `round-end-${event.roundId}-${event.timestamp}`
-      let id = baseId
-      // Ensure uniqueness in the current list
-      if (prev.some(a => a.id === id)) {
-        id = `${baseId}-${Math.floor(Math.random() * 100000)}`
-      }
-      return [
-        {
-          id,
-          type: "round_end",
-          data: event,
-          timestamp: event.timestamp,
-        },
-        ...prev.slice(0, 9),
-      ]
-    })
-  }, [])
-
-  useContractEvents(handleStakeEvent, undefined, handleRoundEndedEvent)
 
   if (!mounted) {
     return null
@@ -218,12 +139,13 @@ export default function Home() {
               isRoundExpired={isRoundExpired}
               isActive={roundInfo.isActive}
               stakeAmountUpdated={stakeAmountUpdated}
+              roundId={roundInfo.roundId}
             />
           </div>
 
           {/* Right Column - Activity Feed */}
           <div className="lg:col-span-1 slide-in-up">
-            <ActivityFeed activities={activities} />
+            <ActivityFeed currentRoundId={roundInfo?.roundId} />
           </div>
         </div>
 
