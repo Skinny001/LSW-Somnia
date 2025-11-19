@@ -239,5 +239,5 @@ For questions or issues, please create an issue in the repository or contact the
 
 
 ### Rewarder Contract
-- **Address:** `0xEa9C19564186958FB6De241c049c3727a6a40c28`
-- **Explorer:** https://somnia.w3us.site/address/0xEa9C19564186958FB6De241c049c3727a6a40c28
+- **Address:** `0x0673d3E814Ea61E3c7400E97E5ec31B6b84ff872`
+- **Explorer:** https://somnia.w3us.site/address/0x0673d3E814Ea61E3c7400E97E5ec31B6b84ff872

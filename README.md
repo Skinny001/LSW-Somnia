@@ -28,7 +28,7 @@ Last Staker Wins is a competitive blockchain game on Somnia Testnet where player
 
 **Smart Contracts (Somnia Testnet):**
 - **LSW Contract**: `0xab20e6D156F6F1ea70793a70C01B1a379b603D50` - Round management and stake collection
-- **Rewarder Contract**: `0xEa9C19564186958FB6De241c049c3727a6a40c28` - Reward distribution with Chainlink VRF
+- **Rewarder Contract**: `0x0673d3E814Ea61E3c7400E97E5ec31B6b84ff872` - Reward distribution with Chainlink VRF
 
 ## Game Flow
 
