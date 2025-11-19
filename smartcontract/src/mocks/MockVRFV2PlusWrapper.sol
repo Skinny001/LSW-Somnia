@@ -22,6 +22,10 @@ contract MockVRFV2PlusWrapper {
         uint32 numWords
     );
     
+    function calculateRequestPrice(uint32 /* _callbackGasLimit */, uint32 /* _numWords */) external pure returns (uint256) {
+        return REQUEST_PRICE;
+    }
+    
     function calculateRequestPriceNative(uint32 /* _callbackGasLimit */) external pure returns (uint256) {
         return REQUEST_PRICE;
     }
@@ -29,7 +33,8 @@ contract MockVRFV2PlusWrapper {
     function requestRandomWordsInNative(
         uint32 _callbackGasLimit,
         uint16 _requestConfirmations,
-        uint32 _numWords
+        uint32 _numWords,
+        bytes memory _extraArgs
     ) external payable returns (uint256 requestId) {
         require(msg.value >= REQUEST_PRICE, "Insufficient payment");
         

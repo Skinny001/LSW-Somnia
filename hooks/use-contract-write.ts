@@ -2,9 +2,9 @@
 
 import { useState, useCallback } from "react"
 import { useAccount, useWriteContract, useWaitForTransactionReceipt } from "wagmi"
-import { LSW_CONTRACT_ADDRESS, MINIMUM_STAKE } from "@/lib/somnia-config"
+import { LSW_CONTRACT_ADDRESS } from "@/lib/somnia-config"
 import { LSW_ABI } from "@/lib/contract-abi"
-import { parseEther } from "viem"; 
+import { getStakeAmount } from "@/lib/contract-service"
 
 export function useContractWrite() {
   const { address, isConnected } = useAccount()
@@ -12,7 +12,7 @@ export function useContractWrite() {
   const { isLoading: isWaiting } = useWaitForTransactionReceipt({ hash })
   const [error, setError] = useState<string | null>(null)
 
-  const executeStake = useCallback(async (value?: bigint) => {
+  const executeStake = useCallback(async () => {
     setError(null)
 
     if (!isConnected || !address) {
@@ -20,18 +20,19 @@ export function useContractWrite() {
       return null
     }
 
-
     try {
+      // Fetch the current stakeAmount from contract
+      const stakeAmount = await getStakeAmount()
+      
       writeContract({
         address: LSW_CONTRACT_ADDRESS as `0x${string}`,
         abi: LSW_ABI,
         functionName: "stake",
-        // value is expected in the chain native smallest unit (wei-like). We
-        // assume callers pass `value` already in 18-decimal units (STT wei).
-        value: value !== undefined ? value : BigInt(0),
+        // Use the stakeAmount fetched from the contract
+        value: stakeAmount,
         account: address,
       })
-      console.log("reach here")
+      console.log("Stake transaction initiated with amount:", stakeAmount.toString())
       return hash
     } catch (err) {
       console.log("Stake error:", err)

@@ -126,7 +126,7 @@ export function StakingInterface({ isStakingAvailable, isRoundExpired, isActive,
     setPendingStakeAmount(minimumStake)
     
     try {
-      const result = await executeStake(minimumStake)
+      const result = await executeStake()
       console.log("Stake transaction submitted:", result)
       console.log("⏳ Waiting for transaction confirmation before adding activity...")
     } catch (err) {

@@ -5,7 +5,7 @@ pragma solidity ^0.8.19;
 // Last Staker Win Contract: Rewarder Contract
 // written by 0xblackadam
 
-import {VRFV2PlusWrapperConsumerBase} from "@chainlink/contracts/src/v0.8/dev/vrf/VRFV2PlusWrapperConsumerBase.sol";
+import {VRFV2PlusClient} from "@chainlink/contracts/src/v0.8/vrf/dev/libraries/VRFV2PlusClient.sol";
 
 interface ILSW {
     function closeRound(uint256 roundId) external;
@@ -13,14 +13,29 @@ interface ILSW {
     function treasury() external view returns (address);
 }
 
-contract Rewarder is VRFV2PlusWrapperConsumerBase {
+interface IVRFV2PlusWrapper {
+    function requestRandomWordsInNative(
+        uint32 callbackGasLimit,
+        uint16 requestConfirmations,
+        uint32 numWords,
+        bytes memory extraArgs
+    ) external payable returns (uint256);
+    
+    function calculateRequestPrice(
+        uint32 callbackGasLimit,
+        uint32 numWords
+    ) external view returns (uint256);
+}
+
+contract Rewarder {
     address public owner;
     address public lswContract;
+    address public vrfWrapperAddress;
     
     // VRF Configuration
     uint16 public constant REQUEST_CONFIRMATIONS = 3;
     uint32 public constant CALLBACK_GAS_LIMIT = 2_100_000;
-    uint32 public constant NUM_WORDS = 10; // Request 10 random numbers for selecting participants
+    uint32 public constant NUM_WORDS = 10;
     
     // Pending reward distributions
     struct PendingReward {
@@ -30,8 +45,8 @@ contract Rewarder is VRFV2PlusWrapperConsumerBase {
         bool fulfilled;
     }
     
-    mapping(uint256 => PendingReward) public pendingRewards; // VRF requestId => PendingReward
-    mapping(uint256 => uint256) public roundToRequestId; // roundId => VRF requestId
+    mapping(uint256 => PendingReward) public pendingRewards;
+    mapping(uint256 => uint256) public roundToRequestId;
 
     // Events
     event RandomnessRequested(uint256 indexed roundId, uint256 requestId, uint256 paid);
@@ -47,12 +62,13 @@ contract Rewarder is VRFV2PlusWrapperConsumerBase {
 
     constructor(
         address _lswContract,
-        address _vrfWrapper
-    ) VRFV2PlusWrapperConsumerBase(address(0), _vrfWrapper) {
-        if (_lswContract == address(0) || _vrfWrapper == address(0)) revert ZeroAddress();
+        address _vrfWrapperAddress
+    ) {
+        if (_lswContract == address(0) || _vrfWrapperAddress == address(0)) revert ZeroAddress();
         
         owner = msg.sender;
         lswContract = _lswContract;
+        vrfWrapperAddress = _vrfWrapperAddress;
     }
 
     modifier onlyOwner() {
@@ -68,6 +84,11 @@ contract Rewarder is VRFV2PlusWrapperConsumerBase {
     function updateLSWContract(address _lswContract) external onlyOwner {
         if (_lswContract == address(0)) revert ZeroAddress();
         lswContract = _lswContract;
+    }
+
+    function updateVRFWrapperAddress(address _vrfWrapperAddress) external onlyOwner {
+        if (_vrfWrapperAddress == address(0)) revert ZeroAddress();
+        vrfWrapperAddress = _vrfWrapperAddress;
     }
 
     // Function to reward random 10 stakers from the round participants
@@ -126,35 +147,52 @@ contract Rewarder is VRFV2PlusWrapperConsumerBase {
         uint256 participantAmount,
         uint256 treasuryAmount
     ) private {
-        // Calculate the required payment for VRF request
-        uint256 requestPrice = VRF_V2_PLUS_WRAPPER.calculateRequestPriceNative(CALLBACK_GAS_LIMIT);
-        
-        if (address(this).balance < requestPrice) {
-            revert InsufficientPayment(requestPrice, address(this).balance);
-        }
-        
-        // Request randomness with native payment
-        uint256 requestId = requestRandomnessPayInNative(
-            CALLBACK_GAS_LIMIT,
-            REQUEST_CONFIRMATIONS,
-            NUM_WORDS
-        );
-        
-        // Store pending reward info
-        pendingRewards[requestId] = PendingReward({
-            roundId: roundId,
-            randomParticipantsAmount: participantAmount,
-            platformTreasuryAmount: treasuryAmount,
-            fulfilled: false
-        });
-        
-        roundToRequestId[roundId] = requestId;
-        
-        emit RandomnessRequested(roundId, requestId, requestPrice);
+            // Request randomness from the VRF wrapper
+            IVRFV2PlusWrapper wrapper = IVRFV2PlusWrapper(vrfWrapperAddress);
+            
+            uint256 vrfCost = getRequestPrice();
+            
+            if (address(this).balance < vrfCost) {
+                revert InsufficientPayment(vrfCost, address(this).balance);
+            }
+
+            // Encode extraArgs: tag (4 bytes) + ExtraArgsV1 struct (32 bytes) = 36 bytes
+            // Use the proper VRFV2PlusClient tag
+            bytes memory args = abi.encodePacked(
+                VRFV2PlusClient.EXTRA_ARGS_V1_TAG,
+                abi.encode(VRFV2PlusClient.ExtraArgsV1({nativePayment: true}))
+            );
+            
+            // Request randomness with the calculated cost
+            uint256 requestId = wrapper.requestRandomWordsInNative{value: vrfCost}(
+                CALLBACK_GAS_LIMIT,
+                REQUEST_CONFIRMATIONS,
+                NUM_WORDS,
+                args
+            );
+            
+            // Store pending reward info
+            pendingRewards[requestId] = PendingReward({
+                roundId: roundId,
+                randomParticipantsAmount: participantAmount,
+                platformTreasuryAmount: treasuryAmount,
+                fulfilled: false
+            });
+            
+            roundToRequestId[roundId] = requestId;
+            
+            emit RandomnessRequested(roundId, requestId, vrfCost);
     }
 
-    // Chainlink VRF callback function - this is what Chainlink calls
-    function fulfillRandomWords(uint256 requestId, uint256[] memory randomWords) internal override {
+    // Callback function called by VRF Wrapper
+    function rawFulfillRandomWords(uint256 requestId, uint256[] memory randomWords) external {
+        // Only VRF wrapper can call this
+        require(msg.sender == vrfWrapperAddress, "Only VRF wrapper can call");
+        fulfillRandomWords(requestId, randomWords);
+    }
+
+    // Internal function to handle the random words
+    function fulfillRandomWords(uint256 requestId, uint256[] memory randomWords) internal {
         PendingReward storage reward = pendingRewards[requestId];
         
         if (reward.fulfilled) revert RewardAlreadyFulfilled();
@@ -233,7 +271,8 @@ contract Rewarder is VRFV2PlusWrapperConsumerBase {
      * @return The price in wei for requesting random numbers
      */
     function getRequestPrice() public view returns (uint256) {
-        return VRF_V2_PLUS_WRAPPER.calculateRequestPriceNative(CALLBACK_GAS_LIMIT);
+        IVRFV2PlusWrapper wrapper = IVRFV2PlusWrapper(vrfWrapperAddress);
+        return wrapper.calculateRequestPrice(CALLBACK_GAS_LIMIT, NUM_WORDS);
     }
 
     // Emergency withdrawal
