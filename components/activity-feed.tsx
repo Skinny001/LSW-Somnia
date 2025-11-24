@@ -20,8 +20,47 @@ interface ActivityFeedProps {
 export function ActivityFeed({ currentRoundId, onStakeActivity }: ActivityFeedProps) {
   const [activities, setActivities] = useState<Activity[]>([])
 
+  // Key for localStorage for all rounds
+  const STORAGE_KEY = 'lsw-activity-all-rounds';
+
+  // Load activities for all rounds from localStorage on mount
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      let loaded: Activity[] = [];
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          loaded = parsed;
+        }
+      }
+      // Merge SDK events (if any) with loaded activities, deduplicate by id
+      setActivities(prev => {
+        if (prev.length === 0) return loaded;
+        const merged = [...loaded, ...prev].reduce<Activity[]>((acc, act) => {
+          if (!acc.find(a => a.id === act.id)) acc.push(act);
+          return acc;
+        }, []);
+        return merged;
+      });
+    } catch (err) {
+      console.warn('Failed to load activities from localStorage:', err);
+      setActivities([]);
+    }
+  }, []);
+
+  // Save activities to localStorage whenever they change
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(activities));
+    } catch (err) {
+      console.warn('Failed to save activities to localStorage:', err);
+    }
+  }, [activities]);
+
   // Function to add immediate stake activity (called directly from staking)
   const addImmediateActivity = (staker: string, amount: bigint, roundId: bigint) => {
+    // Add activity for the round after transaction confirmation
     const activity: Activity = {
       id: `immediate-stake-${Date.now()}-${Math.random()}`,
       type: "stake",
@@ -33,14 +72,18 @@ export function ActivityFeed({ currentRoundId, onStakeActivity }: ActivityFeedPr
       },
       timestamp: Date.now(),
       source: "local"
-    }
-    
-    console.log('⚡ Adding immediate stake activity:', activity)
-    setActivities(prev => [activity, ...prev.slice(0, 9)])
-    
-    // Also call callback if provided
+    };
+    setActivities(prev => {
+      // Add to all activities, keep max 100
+      const updated = [activity, ...prev].slice(0, 100);
+      // Save to localStorage immediately
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
     if (onStakeActivity) {
-      onStakeActivity(activity)
+      onStakeActivity(activity);
     }
   }
 
@@ -57,48 +100,51 @@ export function ActivityFeed({ currentRoundId, onStakeActivity }: ActivityFeedPr
   }, [currentRoundId])
 
   // Clear activities when round changes
-  useEffect(() => {
-    if (currentRoundId) {
-      console.log(`📋 Round changed to ${currentRoundId} - clearing SDK activities`)
-      setActivities([])
-    }
-  }, [currentRoundId])
+  // Removed unnecessary useEffect for clearing activities on round change
 
   // Memoize filteredActivities to prevent infinite update loop
-  const filteredActivities = React.useMemo(() => {
-    return activities.filter((activity) => {
-      if (activity.type === "round_end") {
-        const winner = activity.data?.winner
-        if (!winner || winner === "0x0000000000000000000000000000000000000000" || winner === "0x0") {
-          return false
-        }
-      }
-      // Only show activities for current round
-      if (currentRoundId && activity.data?.roundId && BigInt(activity.data.roundId) !== currentRoundId) {
-        return false
-      }
-      return true
-    })
-  }, [activities, currentRoundId])
-
+  const filteredActivities: Activity[] = React.useMemo(() => {
+    // Show all activities for the current round
+    return Array.isArray(activities)
+      ? activities.filter((activity: Activity) => {
+          if (activity.type === "round_end") {
+            const winner = activity.data?.winner;
+            if (!winner || winner === "0x0000000000000000000000000000000000000000" || winner === "0x0") {
+              return false;
+            }
+          }
+          // Only show activities for current round
+          if (currentRoundId && activity.data?.roundId && BigInt(activity.data.roundId) !== currentRoundId) {
+            return false;
+          }
+          return true;
+        })
+      : [];
+  }, [activities, currentRoundId]);
 
 
   // Set up SDK event subscriptions for activities
   useEffect(() => {
-    let mounted = true
-    let stakeUnsubscribe: (() => void) | null = null
-    let roundUnsubscribe: (() => void) | null = null
+    let mounted = true;
+    let stakeUnsubscribe: (() => void) | null = null;
+    let roundUnsubscribe: (() => void) | null = null;
+
+    const saveActivities = (activities: Activity[]) => {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(activities));
+      } catch {}
+    };
 
     const setupSDKSubscriptions = async () => {
       try {
-        console.log('🚀 Setting up SDK subscriptions for round:', currentRoundId)
-        
+        console.log('🚀 Setting up SDK subscriptions for round:', currentRoundId);
+
         // Subscribe to stake events
         stakeUnsubscribe = await subscribeToNetworkEvents('PlayerStaked', (event: any) => {
-          console.log('🔥🔥🔥 RAW STAKE SDK EVENT RECEIVED:', JSON.stringify(event, null, 2))
+          console.log('🔥🔥🔥 RAW STAKE SDK EVENT RECEIVED:', JSON.stringify(event, null, 2));
           if (mounted && currentRoundId) {
-            console.log('📡 Processing SDK Stake event for round:', currentRoundId, event)
-            
+            console.log('📡 Processing SDK Stake event for round:', currentRoundId, event);
+
             const activity: Activity = {
               id: `sdk-stake-${event.timestamp || Date.now()}-${Math.random()}`,
               type: "stake",
@@ -110,24 +156,23 @@ export function ActivityFeed({ currentRoundId, onStakeActivity }: ActivityFeedPr
               },
               timestamp: event.timestamp || Date.now(),
               source: "network"
-            }
-            
-            console.log('📋 Adding activity:', activity)
+            };
+
             setActivities(prev => {
-              const newActivities = [activity, ...prev.slice(0, 9)]
-              console.log('📋 Updated activities:', newActivities.length)
-              return newActivities
-            })
+              const newActivities = [activity, ...prev.slice(0, 99)];
+              saveActivities(newActivities);
+              return newActivities;
+            });
           } else {
-            console.log('⚠️ SDK event ignored - mounted:', mounted, 'currentRoundId:', currentRoundId)
+            console.log('⚠️ SDK event ignored - mounted:', mounted, 'currentRoundId:', currentRoundId);
           }
-        })
+        });
 
         // Subscribe to round events
         roundUnsubscribe = await subscribeToNetworkEvents('RoundWon', (event: any) => {
           if (mounted && currentRoundId) {
-            console.log('📡 SDK Round event received:', event)
-            
+            console.log('📡 SDK Round event received:', event);
+
             const activity: Activity = {
               id: `sdk-round-${event.timestamp || Date.now()}-${Math.random()}`,
               type: "round_end",
@@ -139,34 +184,37 @@ export function ActivityFeed({ currentRoundId, onStakeActivity }: ActivityFeedPr
               },
               timestamp: event.timestamp || Date.now(),
               source: "network"
-            }
-            
-            setActivities(prev => [activity, ...prev.slice(0, 9)])
-          }
-        })
+            };
 
-        console.log('✅ SDK activity subscriptions set up for round:', currentRoundId)
-        
+            setActivities(prev => {
+              const newActivities = [activity, ...prev.slice(0, 99)];
+              saveActivities(newActivities);
+              return newActivities;
+            });
+          }
+        });
+
+        console.log('✅ SDK activity subscriptions set up for round:', currentRoundId);
         // Debug: Log subscription status
         console.log('🔍 Subscription status:', {
           stakeUnsubscribe: !!stakeUnsubscribe,
           roundUnsubscribe: !!roundUnsubscribe,
           mounted,
           currentRoundId
-        })
+        });
       } catch (error) {
-        console.error('❌ Failed to set up SDK activity subscriptions:', error)
+        console.error('❌ Failed to set up SDK activity subscriptions:', error);
       }
-    }
+    };
 
-    setupSDKSubscriptions()
+    setupSDKSubscriptions();
 
     return () => {
-      mounted = false
-      if (stakeUnsubscribe) stakeUnsubscribe()
-      if (roundUnsubscribe) roundUnsubscribe()
-    }
-  }, [currentRoundId])
+      mounted = false;
+      if (stakeUnsubscribe) stakeUnsubscribe();
+      if (roundUnsubscribe) roundUnsubscribe();
+    };
+  }, [currentRoundId]);
 
   const formatTime = (timestamp: number) => {
     const seconds = Math.floor((Date.now() - timestamp) / 1000)
@@ -355,3 +403,7 @@ export function ActivityFeed({ currentRoundId, onStakeActivity }: ActivityFeedPr
     </div>
   )
 }
+
+
+
+

@@ -20,6 +20,31 @@ export interface CompletedRound {
 
 export default function RoundHistory() {
   const [networkRounds, setNetworkRounds] = useState<CompletedRound[]>([])
+  const storageKey = 'lsw-round-history';
+
+  // Load history from localStorage on mount
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          setNetworkRounds(parsed);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to load round history from localStorage:', err);
+    }
+  }, []);
+
+  // Save history to localStorage whenever it changes
+  useEffect(() => {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(networkRounds));
+    } catch (err) {
+      console.warn('Failed to save round history to localStorage:', err);
+    }
+  }, [networkRounds]);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date())
 
   // Format wallet address for display
@@ -95,6 +120,11 @@ export default function RoundHistory() {
     console.log("🧹 Clearing round history")
     setNetworkRounds([])
     setLastRefresh(new Date())
+    try {
+      localStorage.removeItem(storageKey);
+    } catch (err) {
+      console.warn('Failed to clear round history from localStorage:', err);
+    }
   }, [])
 
   // Refresh history
@@ -129,6 +159,11 @@ export default function RoundHistory() {
       }))
       
       setNetworkRounds(convertedRounds)
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(convertedRounds));
+      } catch (err) {
+        console.warn('Failed to save refreshed round history to localStorage:', err);
+      }
       setLastRefresh(new Date())
       console.log(`✅ Refreshed with ${convertedRounds.length} valid rounds`)
     } catch (error) {
