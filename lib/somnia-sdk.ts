@@ -62,7 +62,6 @@ export async function initializeSomniaSDK(): Promise<any> {
           transport: http()
         })
       } catch (err) {
-        console.warn('Wallet client creation optional, continuing with public client:', err)
       }
     }
 
@@ -72,24 +71,12 @@ export async function initializeSomniaSDK(): Promise<any> {
       wallet: walletClient as any
     })
 
-    console.log('✅ Somnia SDK initialized successfully')
-    console.log('📡 SDK instance created:', sdkInstance)
-    console.log('📡 SDK properties:', Object.keys(sdkInstance))
-    
-    // Test if streams is available
-    if (sdkInstance.streams) {
-      console.log('📡 SDK.streams available:', Object.keys(sdkInstance.streams))
-    } else {
-      console.warn('📡 SDK.streams not available!')
-    }
-    
     isInitialized = true
     initError = null
     
     return sdkInstance
 
   } catch (error) {
-    console.error('❌ Failed to initialize Somnia SDK:', error)
     initError = error instanceof Error ? error.message : 'Unknown initialization error'
     isInitialized = true // Mark as attempted
     return null
@@ -107,13 +94,11 @@ async function safeSDKOperation<T>(
   try {
     const sdk = await initializeSomniaSDK()
     if (!sdk) {
-      console.warn(`SDK not available for ${operationName}, using fallback`)
       return fallbackValue
     }
     
     return await operation(sdk)
   } catch (error) {
-    console.error(`SDK operation ${operationName} failed:`, error)
     return fallbackValue
   }
 }
@@ -130,45 +115,48 @@ export async function emitGameEvent(
   try {
     const sdk = await initializeSomniaSDK()
     if (!sdk) {
-      console.warn(`SDK not available for emitting ${targetEvent}`)
       return
     }
-    
-    console.log(`📡 Emitting real ${targetEvent} event via SDK:`, { 
-      playerId, 
-      eventType, 
-      data 
-    })
-    
-    // Check if SDK has the expected streams.emit method
-    if (sdk && typeof sdk.streams?.emit === 'function') {
-      await sdk.streams.emit(targetEvent, {
-        playerId,
-        eventType,
-        ...data,
-        timestamp: Date.now(),
-        contractAddress: process.env.NEXT_PUBLIC_CONTRACT_ADDRESS
-      })
-      console.log(`✅ Successfully emitted ${targetEvent} to Somnia network`)
-    } else if (sdk && typeof sdk.emit === 'function') {
-      // Try direct emit method if streams.emit doesn't exist
-      await sdk.emit(targetEvent, {
-        playerId,
-        eventType,
-        ...data,
-        timestamp: Date.now(),
-        contractAddress: process.env.NEXT_PUBLIC_CONTRACT_ADDRESS
-      })
-      console.log(`✅ Successfully emitted ${targetEvent} to Somnia network`)
-    } else {
-      console.warn(`SDK emit method not available. Available methods:`, Object.keys(sdk || {}))
-      // For now, just log the event that would have been emitted
-      console.log(`📡 Would emit ${targetEvent}:`, { playerId, eventType, data })
+
+    const schemaId = process.env.NEXT_PUBLIC_LSW_STREAMS_SCHEMA_ID
+    if (!schemaId) {
+      return
     }
-    
+
+    const publisherAddress = process.env.NEXT_PUBLIC_LSW_PUBLISHER_ADDRESS || 
+      '0x311350f1c7ba0f1749572cc8a948dd7f9af1f42a'
+
+    // For RoundEnded events, encode and publish to Streams
+    if (targetEvent === 'RoundEnded') {
+      const { SchemaEncoder } = await import('@somnia-chain/streams')
+      const ROUND_ENDED_SCHEMA = 'uint256 roundId, address winner, uint256 totalAmount, uint256 timestamp'
+      const schemaEncoder = new SchemaEncoder(ROUND_ENDED_SCHEMA)
+
+      const encodedData = schemaEncoder.encodeData([
+        { name: 'roundId', type: 'uint256', value: BigInt(data.roundId) },
+        { name: 'winner', type: 'address', value: data.winner },
+        { name: 'totalAmount', type: 'uint256', value: BigInt(data.totalAmount) },
+        { name: 'timestamp', type: 'uint256', value: BigInt(Math.floor(Date.now() / 1000)) }
+      ])
+
+      // Publish to Streams using set() method
+      const result = await sdk.streams.set([
+        {
+          id: schemaId as `0x${string}`,
+          schemaId: schemaId as `0x${string}`,
+          data: encodedData
+        }
+      ])
+
+      console.log("Published RoundEnded event to Streams:", result)
+
+      if (result instanceof Error) {
+        return
+      }
+    }
   } catch (error) {
-    console.error(`Failed to emit ${targetEvent} via SDK:`, error)
-    // Don't throw - event emission should be non-blocking
+    // Silently fail - syncing already updated local state
+    // Events will be re-synced on next load if Streams push fails
   }
 }
 
@@ -182,22 +170,13 @@ export async function subscribeToNetworkEvents(
   try {
     const sdk = await initializeSomniaSDK()
     if (!sdk) {
-      console.log(`📡 SDK not available - no ${eventName} subscription (no demo events will be created)`)
       return null
     }
-    
-    console.log(`📡 Setting up real SDK subscription for ${eventName}`)
-    console.log(`📡 SDK instance:`, sdk)
-    console.log(`📡 Available SDK properties:`, Object.keys(sdk))
     
     // Check if SDK has streams property
     if (!sdk.streams) {
-      console.warn(`📡 SDK does not have 'streams' property. Available: ${Object.keys(sdk)}`)
       return null
     }
-    
-    console.log(`📡 SDK streams available:`, sdk.streams)
-    console.log(`📡 SDK streams methods:`, Object.keys(sdk.streams))
     
     // Use the real Somnia SDK streams API
     // Subscribe to blockchain events via the streams interface
@@ -207,7 +186,6 @@ export async function subscribeToNetworkEvents(
       (sdkEvent: any) => {
         // Only process events that come from real network activity
         if (!sdkEvent) {
-          console.log(`📡 Ignoring invalid network event for ${eventName}:`, sdkEvent)
           return
         }
 
@@ -227,7 +205,6 @@ export async function subscribeToNetworkEvents(
             source: 'LSW_RoundEnded'
           }
           
-          console.log(`📡 Processing RoundEnded event from LSW:`, roundEndActivity)
           callback(roundEndActivity)
           return
         }
@@ -249,7 +226,6 @@ export async function subscribeToNetworkEvents(
             source: 'LSW_RewardsDistributed'
           }
           
-          console.log(`📡 Processing LSW RewardsDistributed event:`, lswRewardsActivity)
           callback(lswRewardsActivity)
           return
         }
@@ -270,7 +246,6 @@ export async function subscribeToNetworkEvents(
             source: 'Rewarder_RewardsDistributed'
           }
           
-          console.log(`📡 Processing Rewarder RewardsDistributed event:`, rewarderActivity)
           callback(rewarderActivity)
           return
         }
@@ -289,14 +264,12 @@ export async function subscribeToNetworkEvents(
             source: 'Rewarder_RandomnessRequested'
           }
           
-          console.log(`📡 Processing RandomnessRequested event:`, randomnessActivity)
           callback(randomnessActivity)
           return
         }
 
         // Handle other events (like PlayerStaked)
         if (!sdkEvent.address && !sdkEvent.player && !sdkEvent.from) {
-          console.log(`📡 Ignoring event without address for ${eventName}:`, sdkEvent)
           return
         }
 
@@ -311,7 +284,6 @@ export async function subscribeToNetworkEvents(
           timestamp: sdkEvent.timestamp || Date.now()
         }
         
-        console.log(`📡 Processing real network event: ${eventName}`, networkActivity)
         callback(networkActivity)
       }
     )
@@ -321,12 +293,9 @@ export async function subscribeToNetworkEvents(
       if (streamSubscription && streamSubscription.unsubscribe) {
         streamSubscription.unsubscribe()
       }
-      console.log(`📡 Unsubscribed from ${eventName} events`)
     }
     
   } catch (error) {
-    console.error(`Failed to subscribe to ${eventName}:`, error)
-    console.log(`📡 No ${eventName} subscription active - no demo events will be generated`)
     return null
   }
 }
@@ -368,7 +337,6 @@ export async function getNetworkStats(): Promise<NetworkStats> {
     async (sdk) => {
       // Use SDK to collect real network statistics
       try {
-        console.log('📊 Collecting real network stats via SDK streams...')
         
         // The SDK will provide real network data once properly connected
         // For now, we'll use the SDK instance to indicate real connection
@@ -383,7 +351,6 @@ export async function getNetworkStats(): Promise<NetworkStats> {
         }
         
       } catch (sdkError) {
-        console.warn('SDK connection issue:', sdkError)
         return fallbackStats
       }
     },
@@ -401,7 +368,6 @@ export async function getTopPlayers(): Promise<TopPlayer[]> {
   return safeSDKOperation(
     async (sdk) => {
       try {
-        console.log('🏆 SDK connected - leaderboard will be populated by real network events...')
         
         // The leaderboard will be built from real network events
         // as they come in via the subscription system
@@ -410,7 +376,6 @@ export async function getTopPlayers(): Promise<TopPlayer[]> {
         return fallbackPlayers
         
       } catch (sdkError) {
-        console.warn('SDK connection issue for leaderboard:', sdkError)
         return fallbackPlayers
       }
     },

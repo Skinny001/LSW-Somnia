@@ -2,6 +2,7 @@
 
 import { useEffect } from "react"
 import { watchStakeEvents, watchRoundStartedEvents, watchRoundEndedEvents } from "@/lib/contract-service"
+import { GameEventEmitters } from "@/lib/somnia-sdk"
 
 export interface StakeEvent {
   roundId: bigint
@@ -62,12 +63,21 @@ export function useContractEvents(
 
         if (onRoundEnded) {
           const unsubscribe = await watchRoundEndedEvents((roundId, winner, totalAmount) => {
-            onRoundEnded({
+            const event = {
               roundId,
               winner,
               totalAmount,
               timestamp: Date.now(),
-            })
+            }
+            
+            // Emit to Somnia Streams
+            try {
+              GameEventEmitters.roundEnded(roundId.toString(), winner, totalAmount)
+            } catch (err) {
+              console.warn("Failed to emit roundEnded to Somnia Streams:", err)
+            }
+            
+            onRoundEnded(event)
           })
           unsubscribers.push(unsubscribe)
         }
