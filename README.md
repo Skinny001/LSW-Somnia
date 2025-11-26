@@ -30,6 +30,11 @@ Last Staker Wins is a competitive blockchain game on Somnia Testnet where player
 - **LSW Contract**: `0xab20e6D156F6F1ea70793a70C01B1a379b603D50` - Round management and stake collection
 - **Rewarder Contract**: `0x0673d3E814Ea61E3c7400E97E5ec31B6b84ff872` - Reward distribution with Chainlink VRF
 
+**Data Streaming (Somnia Streams SDK):**
+- **Schema ID**: `0x031db35182a3329e459bb35cb88f797dbe1a1198d959de547d8bda570a93fe45`
+- **Publisher Address**: `0x311350f1c7Ba0F1749572Cc8A948Dd7f9aF1f42a`
+- **RoundEnded Schema**: `uint256 roundId, address winner, uint256 totalAmount, uint256 timestamp`
+
 ## Game Flow
 
 1. **Round Initialization** - New round starts with a configurable duration
@@ -57,7 +62,52 @@ graph TD
 
 For complete technical details, contract function documentation, deployment instructions, and testing guide, see [smartcontract/README.md](./smartcontract/README.md).
 
-## Getting Started
+## Somnia Streams SDK Integration
+
+The application uses **Somnia Streams SDK** for on-chain data streaming and real-time round history tracking.
+
+### How It Works
+
+1. **Round Events to Streams** - When a round ends, the `RoundEnded` event is encoded and published to Somnia Streams
+2. **Live History Updates** - The `useSmartRoundHistory` hook:
+   - Fetches all rounds from Streams using the literal schema string
+   - Compares contract round with latest stream round
+   - Syncs missing rounds from Logs API via `/api/publish-round`
+   -  Displays on the Round History page
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Round History Flow                       │
+└─────────────────────────────────────────────────────────────┘
+
+1. Hook Initialization (useSmartRoundHistory)
+   ├─ Initialize Somnia SDK
+   └─ Fetch all rounds from Streams
+
+2. Streams Fetch
+   ├─ Use literal schema: "uint256 roundId, address winner, uint256 totalAmount, uint256 timestamp"
+   ├─ Decode with SchemaEncoder
+   └─ Parse into RoundHistory objects
+
+3. Sync Detection
+   ├─ Get current contract round
+   ├─ Compare: if currentRound > latestStreamRound + 1
+   └─ Trigger sync if out of sync
+
+4. Missing Rounds Sync
+   ├─ Fetch from Logs API: https://somnia.w3us.site/api/v2/addresses/{CONTRACT}/logs
+   ├─ Filter for RoundEnded events
+   ├─ Extract all missing rounds
+   └─ Push via /api/publish-round → publishRoundEndedEventServer()
+
+5. UI Display
+   ├─ Merge Streams + synced rounds
+   └─ Sort and display
+```
+
+---## Getting Started
 
 **For Players:**
 1. Connect your Web3 wallet (MetaMask, WalletConnect, etc.)
