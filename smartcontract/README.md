@@ -184,46 +184,7 @@ forge coverage
 - `updateVRFConfig()`: Update Chainlink VRF configuration
 - `emergencyWithdraw()`: Emergency withdrawal (owner only)
 
-## Events
 
-### LSW Contract Events
-- `RoundStarted(uint256 roundId, uint256 deadline)`
-- `StakeReceived(uint256 roundId, address staker, uint256 amount, uint256 newDeadline)`
-- `RoundEnded(uint256 roundId, address winner, uint256 totalAmount)`
-- `RewardsDistributed(uint256 roundId, address winner, uint256 winnerAmount, uint256 participantAmount, uint256 treasuryAmount)`
-
-### Common Error Messages
-- `StakingNotYetAvailable()`: Attempted to stake during wait period
-- `RoundExpired()`: Attempted to stake after round deadline
-- `InsufficientStakeAmount()`: Stake amount below minimum required
-- `RoundNotEnded()`: Attempted to start new round before current ends
-
-### Rewarder Contract Events
-- `RandomnessRequested(uint256 roundId, uint256 requestId)`
-- `RewardsDistributed(uint256 roundId, address[] winners, uint256 rewardPerWinner, uint256 treasuryAmount)`
-- `VRFConfigUpdated(address coordinator, bytes32 keyHash, uint64 subId)`
-
-## Security Considerations
-
-1. **Chainlink VRF Dependency**: The system relies on Chainlink VRF for fair randomness
-2. **Manual Fallback**: Manual distribution is available if VRF fails
-3. **Access Control**: Strict permissions for critical functions
-4. **Emergency Functions**: Owner can withdraw funds in emergencies
-5. **Input Validation**: All inputs are validated before processing
-
-## Gas Optimization
-
-- Efficient storage layout with struct packing
-- Minimal external calls during staking
-- Batch operations where possible
-- Event emissions for off-chain indexing
-
-## Upgradeability
-
-The contracts are not upgradeable by design for security and trust. However, configuration parameters can be adjusted by the owner:
-- Stake amounts and timing parameters
-- Treasury and rewarder addresses
-- VRF configuration
 
 ## License
 
