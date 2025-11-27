@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import { useContractWrite } from "@/hooks/use-contract-write"
 import { useWaitForTransactionReceipt } from "wagmi"
 import { Button } from "@/components/ui/button"
-import { formatEther, formatHbar} from "@/lib/format-utils"
+import {  formatHbar} from "@/lib/format-utils"
 import { MINIMUM_STAKE } from "@/lib/somnia-config"
 import { GameEventEmitters } from "@/lib/somnia-sdk"
 
