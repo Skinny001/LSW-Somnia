@@ -145,7 +145,7 @@ export default function Home() {
 
           {/* Right Column - Activity Feed */}
           <div className="lg:col-span-1 slide-in-up">
-            <ActivityFeed currentRoundId={roundInfo?.roundId} />
+            <ActivityFeed currentRoundId={roundInfo?.roundId ?? BigInt(0)} />
           </div>
         </div>
 

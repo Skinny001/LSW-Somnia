@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Activity, RefreshCw } from "lucide-react"
 import { useCallback } from "react"
 
-export function ActivityFeed() {
+export function ActivityFeed({ currentRoundId }: { currentRoundId?: bigint }) {
   const { events, isLoading, error, refresh } = useActivityFeed()
 
   const handleRefresh = useCallback(async () => {
